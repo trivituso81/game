@@ -2,6 +2,21 @@
 
 Every push adds an entry here. Newest first.
 
+## 1b (2026-11-12): battle core with placeholders
+
+- New `engine/battle.js` (rules and state): two grey party members (ATTACK, SPECIAL once per fight, BAG, GUARD), one grey monster, one grey boss with a two-hit shield. Turn order: each living member picks a command in turn, then the enemy acts. No randomness.
+- Level-up: each standing member gains XP per win and levels at 12 x level, adding 5 max HP and 1 attack.
+- Difficulty: EASY, NORMAL, HARD scale enemy damage (x0.5, x1, x1.5). Picked on the title with LEFT and RIGHT, the D-pad, or a tap on the line.
+- Bag: two placeholder items, each heals the lowest-HP member for 12.
+- Second-layer rules are present behind `SECOND_LAYER` switches (weakness, status effects, combos), all off.
+- New `engine/battle-draw.js`: the battle fills the window and the D-pad and A overlay it. Command cross (SPECIAL up, BAG left, GUARD right, ATTACK down), turn chips, HP bars, shield pips, message box, result box. Taps work on the cross, on messages (skip) and on the result.
+- Field FIELD B has a grey monster at (14,14) and a grey boss at (18,34). Walking onto one starts its fight. A win removes the monster; a loss restores the party and leaves it in place.
+- `engine/world.js` validates that monsters stand on walkable tiles and have a known kind. `engine/draw.js` draws monsters and the difficulty line on the title.
+- Debug handle adds `battle`, `party`, `bag`, `difficulty`, `lastResult`, `monsters` and `startBattle(kind, opts)`.
+- `tools/smoke.py`: 46 checks, all passing in both orientations. Adds the monster fight won, the boss shield absorbing the first hit, and a loss that restores the party.
+- Cache tags bumped to `?v=1b` on all engine scripts.
+- Known: names, numbers and rules are placeholders until intake round 2. The battle uses the reference's shape (shield pips, difficulty on enemy damage) without its names, art or animation.
+
 ## 1a.2 (2026-11-12): full-screen stage
 
 - The map fills the whole window in portrait and landscape, one logical pixel per screen pixel. The D-pad and A are drawn over the map, as in the first game, instead of reserving space around it.

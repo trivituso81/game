@@ -1,5 +1,5 @@
 'use strict';
-// engine/world.js: Build 1a placeholder world. Three grey areas, each with a walk mask and portals. No names, no art.
+// engine/world.js: Build 1b placeholder world. Three grey areas, each with a walk mask, portals and (field only) grey fights. No names, no art.
 // Walk mask legend: '#' blocked, '.' walkable, 'D' door (walk onto it to go in), 'M' mat (walk onto it to go out),
 // 'E' edge (walk onto it to go on to the next area). Doors, mats and edges are portals; each portal says where it leads.
 const T=16;                                             // logical pixels per tile
@@ -17,7 +17,8 @@ function boxedArea(id,name,w,h,opts) {
   for(const s of opts.stamps) stamp(g,s.x,s.y,s.rows);
   const portals=new Map();
   for(const p of opts.portals) portals.set(p.x+','+p.y,{to:p.to,spawn:p.spawn});
-  return {id,name,w,h,grid:g,portals,spawn:opts.spawn,indoor:!!opts.indoor};
+  const monsters=(opts.monsters||[]).map(m=>({id:m.id,kind:m.kind,x:m.x,y:m.y,alive:true}));
+  return {id,name,w,h,grid:g,portals,monsters,spawn:opts.spawn,indoor:!!opts.indoor};
 }
 
 const AREAS={
@@ -42,6 +43,10 @@ const AREAS={
       {x:1,y:20,rows:['E']}                               // west edge back to town
     ],
     portals:[{x:1,y:20,to:'town',spawn:{x:19,y:20}}],
+    monsters:[
+      {id:'field-monster',kind:'monster',x:14,y:14},   // test fight: a grey monster
+      {id:'field-boss',kind:'boss',x:18,y:34}          // a grey boss with a shield
+    ],
     spawn:{x:2,y:20}
   }),
   room:boxedArea('room','ROOM A',10,8,{
@@ -58,6 +63,8 @@ const AREAS={
 function inside(area,x,y) { return x>=0&&y>=0&&x<area.w&&y<area.h; }
 function walkable(area,x,y) { return inside(area,x,y)&&area.grid[y][x]!=='#'; }
 function portalAt(area,x,y) { return area.portals.get(x+','+y)||null; }
+// The live fight standing on a tile, if any. Defeated monsters stay in the list with alive false, so they do not come back.
+function monsterAt(area,x,y) { return area.monsters.find(m=>m.alive&&m.x===x&&m.y===y)||null; }
 
 // Checks the world tables. Returns a list of problems (empty when the world is sound).
 function validateWorld() {
@@ -75,6 +82,10 @@ function validateWorld() {
       else if(!walkable(t,p.spawn.x,p.spawn.y)) out.push(id+' '+k+' spawn blocked in '+p.to);
     }
     if(!walkable(a,a.spawn.x,a.spawn.y)) out.push(id+' spawn blocked');
+    for(const m of a.monsters) {
+      if(!walkable(a,m.x,m.y)) out.push(id+' '+m.id+' stands on a wall');
+      if(!ENEMY_TYPES[m.kind]) out.push(id+' '+m.id+' has an unknown kind '+m.kind);
+    }
   }
   return out;
 }

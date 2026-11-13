@@ -1,9 +1,10 @@
 'use strict';
-// engine/draw.js: Build 1a drawing. Grey tiles, the placeholder walker, the title card and the fade. Reads the game state from main.js.
+// engine/draw.js: Build 1b drawing. Grey tiles, grey monsters, the placeholder walker, the title card, the fade. Reads the game state from main.js.
 const COLOR={
   floor:'#8d938f', floorAlt:'#868c88', block:'#4a4f4c', blockTop:'#5f6663',
   roomFloor:'#7d7a72', roomAlt:'#77746c', door:'#d2d2d2', mat:'#b8b8b8', edge:'#a9b4af',
-  walkerBody:'#8f8f8f', walkerHead:'#c9c9c9', ink:'#2a2e2c', label:'#eeeeee', shade:'rgba(0,0,0,.25)'
+  walkerBody:'#8f8f8f', walkerHead:'#c9c9c9', ink:'#2a2e2c', label:'#eeeeee', shade:'rgba(0,0,0,.25)',
+  monsterBody:'#7a807c', bossBody:'#b5b0a4'
 };
 const TILE_TAG={D:'IN',M:'OUT',E:'EDGE'};
 
@@ -40,6 +41,19 @@ function drawWalker(time) {
   ctx.fillText('HERO',cx,cy-13);
 }
 
+// Grey placeholder fights on the map. A defeated one is not drawn.
+function drawMonsters(area) {
+  for(const m of area.monsters) {
+    if(!m.alive) continue;
+    const boss=m.kind==='boss', px=m.x*T, py=m.y*T;
+    ctx.fillStyle=COLOR.shade; ctx.beginPath(); ctx.ellipse(px+T/2,py+T-2,boss?7:5,2,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=boss?COLOR.bossBody:COLOR.monsterBody;
+    if(boss) ctx.fillRect(px+1,py+2,T-2,T-3); else ctx.fillRect(px+3,py+4,T-6,T-7);
+    ctx.fillStyle=COLOR.label; ctx.font='bold 5px monospace'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+    ctx.fillText(boss?'BOSS':'MON',px+T/2,py-1);
+  }
+}
+
 function drawAreaName() {
   const label=game.area.name;
   ctx.font='bold 10px monospace'; ctx.textAlign='left'; ctx.textBaseline='top';
@@ -57,8 +71,12 @@ function drawTitle(time) {
   ctx.fillText('[TITLE]',cx,cy-12);
   ctx.font='12px monospace'; ctx.fillStyle='#cfd6d2';
   ctx.fillText('Press A or Enter, or tap, to start',cx,cy+14);
+  ctx.font='11px monospace'; ctx.fillStyle='#eef3ef';
+  ctx.fillText('< DIFFICULTY: '+DIFFICULTY[game.difficulty].label+' >',cx,cy+40);
+  ctx.font='9px monospace'; ctx.fillStyle='#8c9692';
+  ctx.fillText('LEFT, RIGHT or tap to change it',cx,cy+56);
   ctx.font='10px monospace'; ctx.fillStyle='#8c9692';
-  ctx.fillText('Build 1a, placeholder',cx,game.LH-22);
+  ctx.fillText('Build 1b, placeholder',cx,game.LH-22);
 }
 
 function fadeAlpha() {
@@ -67,12 +85,14 @@ function fadeAlpha() {
 }
 
 function drawFrame(time) {
+  if(game.mode==='battle') { drawBattle(time); return; }
   // Outside the map's walls the screen is filled with wall grey, so no black bars show on a tall or wide phone.
   ctx.fillStyle=game.mode==='title'?'#1b2321':'#4a4f4c'; ctx.fillRect(0,0,game.LW,game.LH);
   if(game.mode==='title') { drawTitle(time); return; }
   ctx.save();
   ctx.translate(-Math.round(game.camX),-Math.round(game.camY));
   drawArea(game.area);
+  drawMonsters(game.area);
   drawWalker(time);
   ctx.restore();
   drawAreaName();

@@ -1,6 +1,6 @@
 'use strict';
-// engine/main.js: Build 1a shell. Layout (portrait and landscape), input (keys, gamepad, on-screen D-pad and A, tap to walk),
-// walking, doors and edges, fades, and the frame loop. Loaded last; shares one scope with world.js and draw.js.
+// engine/main.js: Build 1b shell. Layout (portrait and landscape), input (keys, gamepad, on-screen D-pad and A, tap to walk),
+// walking, doors and edges, grey fights (battle.js), fades, and the frame loop. Loaded last; shares one scope with the other engine files.
 const KEYS={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};
 const DIRS={up:{x:0,y:-1},down:{x:0,y:1},left:{x:-1,y:0},right:{x:1,y:0}};
 const STORE_KEY='ffiv-layout';
@@ -11,7 +11,8 @@ const ctx=view.getContext('2d');
 const input={keys:new Map(),touch:null,pad:null};
 const game={
   mode:'title', area:null, walker:{x:0,y:0,fromX:0,fromY:0,toX:0,toY:0,moving:false,t:0,face:'down'},
-  path:null, trans:null, camX:0, camY:0, LW:360, LH:640, k:1, faults:[]
+  path:null, trans:null, camX:0, camY:0, LW:360, LH:640, k:1, faults:[],
+  party:makeParty(), bag:BAG_START, difficulty:1
 };
 
 // ---------- Layout ----------
@@ -83,9 +84,12 @@ function updateTrans(dt) {
 // A step just ended. Standing on a portal starts the trip through it.
 function arrive() {
   const p=portalAt(game.area,game.walker.x,game.walker.y);
-  if(p) startTrans(p.to,p.spawn);
+  if(p) { startTrans(p.to,p.spawn); return; }
+  const m=monsterAt(game.area,game.walker.x,game.walker.y);
+  if(m) startBattle(m.kind,{ref:m});
 }
 function update(dt) {
+  if(game.mode==='battle') { battleUpdate(dt); return; }
   if(game.mode!=='play') return;
   if(game.trans) { updateTrans(dt); return; }
   const w=game.walker;
@@ -94,7 +98,7 @@ function update(dt) {
     if(w.t<1) return;
     w.x=w.toX; w.y=w.toY; w.moving=false; w.t=0;
     arrive();
-    if(game.trans) return;
+    if(game.trans||game.mode!=='play') return;
   }
   const held=heldDir();
   if(held) { game.path=null; tryStep(held); return; }
@@ -115,6 +119,7 @@ function startGame() {
 }
 function action() {
   if(game.mode==='title') { startGame(); return; }
+  if(game.mode==='battle') { battleConfirm(); return; }
   if(game.trans) return;
   const w=game.walker, d=DIRS[w.face];
   if(portalAt(game.area,w.x+d.x,w.y+d.y)) { toast('Walk onto it to go through.'); return; }
@@ -122,11 +127,24 @@ function action() {
 }
 function tapTile(tx,ty) {
   if(game.mode==='title') { startGame(); return; }
-  if(game.trans) return;
+  if(game.mode!=='play'||game.trans) return;
   if(!walkable(game.area,tx,ty)) { toast('Cannot go there.'); return; }
   const path=findPath(game.area,game.walker.x,game.walker.y,tx,ty);
   if(!path) { toast('Cannot get there.'); return; }
   game.path=path;
+}
+function clientToLogical(cx,cy) {
+  const r=view.getBoundingClientRect();
+  return {x:(cx-r.left)*(game.LW/r.width), y:(cy-r.top)*(game.LH/r.height)};
+}
+// Difficulty is picked on the title with LEFT and RIGHT (or the D-pad, or a tap on its line).
+function cycleDifficulty(step) {
+  game.difficulty=(game.difficulty+step+DIFFICULTY.length)%DIFFICULTY.length;
+}
+// A direction press: picks a command slot in a fight, or changes difficulty on the title.
+function dirPressed(d) {
+  if(game.mode==='battle') battleDir(d);
+  else if(game.mode==='title'&&(d==='left'||d==='right')) cycleDifficulty(d==='right'?1:-1);
 }
 function clientToTile(cx,cy) {
   const r=view.getBoundingClientRect();
@@ -138,7 +156,15 @@ function tileToClient(tx,ty) {
   const lx=tx*T+T/2-game.camX, ly=ty*T+T/2-game.camY;
   return {x:r.left+lx*(r.width/game.LW), y:r.top+ly*(r.height/game.LH)};
 }
-view.addEventListener('click',e=>{ const t=clientToTile(e.clientX,e.clientY); tapTile(t.tx,t.ty); });
+view.addEventListener('click',e=>{
+  const p=clientToLogical(e.clientX,e.clientY);
+  if(game.mode==='battle') { battleTap(p.x,p.y); return; }
+  if(game.mode==='title') {
+    if(p.y>game.LH/2+26&&p.y<game.LH/2+62) cycleDifficulty(1); else startGame();
+    return;
+  }
+  const t=clientToTile(e.clientX,e.clientY); tapTile(t.tx,t.ty);
+});
 
 // ---------- Camera ----------
 function updateCamera() {
@@ -152,7 +178,7 @@ function updateCamera() {
 // ---------- Input wiring ----------
 addEventListener('keydown',e=>{
   if(e.code==='KeyL'&&!e.repeat) { e.preventDefault(); toggleLayout(); return; }
-  if(KEYS[e.code]) { e.preventDefault(); input.keys.set(e.code,KEYS[e.code]); return; }
+  if(KEYS[e.code]) { e.preventDefault(); input.keys.set(e.code,KEYS[e.code]); if(!e.repeat) dirPressed(KEYS[e.code]); return; }
   if((e.code==='Enter'||e.code==='Space')&&!e.repeat) { e.preventDefault(); action(); }
 });
 addEventListener('keyup',e=>{ input.keys.delete(e.code); });
@@ -161,7 +187,7 @@ addEventListener('blur',()=>{ input.keys.clear(); input.touch=null; });
 document.querySelectorAll('.dir[data-dir]').forEach(b=>{
   const d=b.dataset.dir;
   const off=()=>{ if(input.touch===d) input.touch=null; b.classList.remove('active'); };
-  b.addEventListener('pointerdown',e=>{ e.preventDefault(); input.touch=d; b.classList.add('active'); });
+  b.addEventListener('pointerdown',e=>{ e.preventDefault(); input.touch=d; b.classList.add('active'); dirPressed(d); });
   b.addEventListener('pointerup',off);
   b.addEventListener('pointercancel',off);
   b.addEventListener('pointerleave',off);
@@ -174,12 +200,14 @@ document.addEventListener('contextmenu',e=>e.preventDefault());
 
 const padPrev={};
 function pollPad() {
+  const before=input.pad;
   const pads=navigator.getGamepads?navigator.getGamepads():[];
   let g=null;
   for(const p of pads) if(p&&p.connected) { g=p; break; }
   if(!g) { input.pad=null; return; }
   const b=i=>!!(g.buttons[i]&&g.buttons[i].pressed), ax=g.axes[0]||0, ay=g.axes[1]||0;
   input.pad=(b(12)||ay<-.5)?'up':(b(13)||ay>.5)?'down':(b(14)||ax<-.5)?'left':(b(15)||ax>.5)?'right':null;
+  if(input.pad&&input.pad!==before) dirPressed(input.pad);
   const a=b(0); if(a&&!padPrev.a) action(); padPrev.a=a;
   const l=b(4); if(l&&!padPrev.l) toggleLayout(); padPrev.l=l;
 }
@@ -211,8 +239,18 @@ window.__FFIV={
   get area(){ return game.area?game.area.id:null; },
   get walker(){ const p=walkerPos(); return {x:game.walker.x,y:game.walker.y,rx:p.x,ry:p.y}; },
   get landscape(){ return isLandscape(); },
-  get busy(){ return !!game.trans||game.walker.moving||!!(game.path&&game.path.length); },
+  get busy(){ return !!game.trans||game.walker.moving||!!(game.path&&game.path.length)||game.mode==='battle'; },
   get faults(){ return faults.slice(); },
   get problems(){ return validateWorld(); },
-  startGame, tapTile, tileToClient, toggleLayout
+  get battle(){
+    if(!BATTLE) return null;
+    return {phase:BATTLE.phase, result:BATTLE.result, cursor:BATTLE.cursor, actor:BATTLE.actor, turn:BATTLE.turn,
+      queue:BATTLE.queue.slice(), enemy:{name:BATTLE.enemy.name,hp:BATTLE.enemy.hp,maxHp:BATTLE.enemy.maxHp,shield:BATTLE.enemy.shield,boss:BATTLE.enemy.boss}};
+  },
+  get party(){ return game.party.map(m=>({name:m.name,lv:m.lv,hp:m.hp,maxHp:m.maxHp,specialUsed:m.specialUsed})); },
+  get bag(){ return game.bag; },
+  get difficulty(){ return DIFFICULTY[game.difficulty].label; },
+  get lastResult(){ return lastResult; },
+  get monsters(){ return game.area?game.area.monsters.map(m=>({id:m.id,kind:m.kind,alive:m.alive})):[]; },
+  startGame, tapTile, tileToClient, toggleLayout, startBattle
 };

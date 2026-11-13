@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Headless smoke test for Build 1a (placeholder world).
+"""Headless smoke test for Build 1b (placeholder world and grey fights).
 
 Run:  CHROMIUM=/usr/bin/google-chrome python3 tools/smoke.py
       (CHROMIUM may be left unset to use Playwright's own Chromium.)
 
 Per orientation (portrait and landscape): title, arrow keys, tap to walk, door in, mat out, edge east, edge west,
-the world tables, faults and console errors. Screenshots go to SHOTS (default /tmp/ffiv-shots). Exits 1 on any failure.
+the world tables, faults and console errors. Build 1b adds: the grey monster on FIELD B starts a fight that is won,
+the boss shield absorbs the first hit, and a fight that is lost restores the party. Screenshots go to SHOTS
+(default /tmp/ffiv-shots). Exits 1 on any failure.
 """
 import os
 import socket
@@ -48,6 +50,17 @@ def wait_idle(page):
 def tap_tile(page, tx, ty):
     c = page.evaluate('([x, y]) => window.__FFIV.tileToClient(x, y)', [tx, ty])
     page.mouse.click(c['x'], c['y'])
+
+
+def fight_out(page, timeout=120):
+    """Plays the open fight to its end: A picks the default command (attack) and skips messages, until the fight closes."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if page.evaluate('() => window.__FFIV.battle') is None:
+            return True
+        page.keyboard.press('Enter')
+        time.sleep(0.15)
+    return False
 
 
 def run_view(browser, name, w, h):
@@ -99,6 +112,39 @@ def run_view(browser, name, w, h):
     wait_idle(page)
     check(f'{name}: east edge leads to field B', page.evaluate('() => __FFIV.area') == 'field')
     page.screenshot(path=f'{SHOTS}/{name}-4-field.png')
+
+    # Build 1b: the grey monster on FIELD B starts a fight, and the fight can be won.
+    tap_tile(page, 14, 14)
+    page.wait_for_function("() => __FFIV.mode === 'battle'", timeout=30000)
+    check(f'{name}: monster on field B starts a fight',
+          page.evaluate('() => __FFIV.battle.enemy.name') == 'MONSTER')
+    page.wait_for_function("() => __FFIV.battle && __FFIV.battle.phase === 'menu'", timeout=30000)
+    page.screenshot(path=f'{SHOTS}/{name}-5-battle.png')
+    check(f'{name}: fight opens on the attack command', page.evaluate('() => __FFIV.battle.cursor') == 'attack')
+    check(f'{name}: fight ends', fight_out(page))
+    check(f'{name}: monster fight is won', page.evaluate('() => __FFIV.lastResult') == 'win')
+    check(f'{name}: defeated monster leaves the map',
+          not any(m['alive'] for m in page.evaluate('() => __FFIV.monsters') if m['kind'] == 'monster'))
+    check(f'{name}: back to walking after the fight', page.evaluate('() => __FFIV.mode') == 'play')
+
+    # The boss has a shield: the first attack is absorbed, the boss keeps its HP.
+    page.evaluate("() => __FFIV.startBattle('boss')")
+    page.wait_for_function("() => __FFIV.battle && __FFIV.battle.phase === 'menu'", timeout=30000)
+    hp_before = page.evaluate('() => __FFIV.battle.enemy.hp')
+    page.keyboard.press('Enter')
+    page.wait_for_function("() => __FFIV.battle && __FFIV.battle.enemy.shield === 1", timeout=30000)
+    check(f'{name}: boss shield absorbs the first hit',
+          page.evaluate('() => __FFIV.battle.enemy.hp') == hp_before)
+    page.screenshot(path=f'{SHOTS}/{name}-6-boss.png')
+    check(f'{name}: boss fight ends', fight_out(page))
+    check(f'{name}: boss fight is won', page.evaluate('() => __FFIV.lastResult') == 'win')
+
+    # A lost fight: the party is restored and the fight closes back to walking.
+    page.evaluate("() => __FFIV.startBattle('monster', {partyHp: 1, enemyHp: 999, enemyAtk: 99})")
+    check(f'{name}: fight can be lost', fight_out(page))
+    check(f'{name}: loss is reported', page.evaluate('() => __FFIV.lastResult') == 'lose')
+    check(f'{name}: loss restores the party',
+          all(p['hp'] == p['maxHp'] for p in page.evaluate('() => __FFIV.party')))
 
     tap_tile(page, 1, 20)
     page.wait_for_function("() => __FFIV.area === 'town'", timeout=15000)
