@@ -2,6 +2,18 @@
 
 Every push adds an entry here. Newest first.
 
+## 1d.2 (2026-11-12): Head Sizes, Portraits and Area editor
+
+- New `heads.html` (Head Sizes), `portraits.html` (Portraits) and `areas.html` (Area editor): three phone pages that commit to main through the GitHub token saved by the Art Library (same `ffiv-gh-token` and `ffiv-repo` keys, no second setup). Shared code is in `admin-lib.js`, which `art.html` now uses too (its behaviour is unchanged).
+- Head Sizes: one head multiplier, the head share, default and per-character heights, saved to `tools/sprite-bake/heights.json`. The preview uses a baked sheet when one exists (grey placeholder otherwise). Values apply at the next bake.
+- Portraits: pick an approved picture (from `data/art-ingame.json`), drag a square and zoom, save a 256 x 256 `art/portraits/<name>.png` and list it in `data/portraits.json`. REMOVE SAVED deletes the file and its list entry.
+- Area editor: opens any area (built-in grey or installed), paints WALL, FLOOR, DOOR, MAT, EDGE and LOCKED tiles over the picture, sets where each door leads and where it arrives, sets the lock flag, the spawn point, GO tiles and fights, and creates new areas (no picture). The check runs in the page before saving; SAVE refuses while it lists problems. Saving writes `data/areas/<id>.json` and updates `data/areas/index.json`. Saving a built-in grey area writes an override with the same id.
+- New `engine/areacheck.js`: the area check in JavaScript, a port of `check()` in `tools/install_area.py`. It adds one rule the installer does not have (a door must arrive on a walkable tile in its target area) and both reject ids other than a-z, 0-9 and dashes, and the id `index`. `tools/test_tools.py` runs 16 specs through both versions and compares.
+- Change of how the game reads areas: `engine/areas-data.js` is gone (it could not be regenerated from a phone). The game now fetches `data/areas/index.json` and each `data/areas/<id>.json` at boot (`loadInstalledAreas()` in `main.js`, `installAreas()` in `world.js`) before the first frame. If the list cannot be read the game starts with the built-in grey areas only. `tools/install_area.py` now writes `index.json` (list plus cache tag) instead of the generated script and no longer edits `index.html`. `__FFIV.ready` is true once areas are loaded.
+- `tools/smoke.py` waits for `__FFIV.ready`; still 84/84. `tools/test_tools.py`: 176 checks (adds the area check parity, each new page against stubbed GitHub in portrait and landscape, an area saved by the editor read by the game, a missing list).
+- Cache tags bumped to `?v=1d2`.
+- Known: not yet tried on Tom's phone with the real GitHub token. GitHub Pages takes about a minute to show a save, then reload the game. Heads preview for a baked sheet is approximate; the exact result comes at the next bake.
+
 ## 1d.1 (2026-11-12): Art Library, generic bakers, area installer
 
 - New `art.html` (Art Library), a phone page. Setup box (xAI key, GitHub token, repo, model, optional relay) kept in this phone's localStorage under `ffiv-`, never in the repo. Prompt list from `data/art-prompts.json` (one TEST prompt for now). GENERATE calls the xAI image API from the phone (`grok-imagine-image`, b64 result; with reference pictures it uses the edits endpoint). UPLOAD MY OWN is the free alternative. Last 5 results per picture are kept on the phone (IndexedDB). APPROVE commits the picture (`art/<id>.<ext>`), the edited prompt (`art/<id>.prompt.txt`) and the list `data/art-ingame.json` to main through the GitHub API. REJECT commits Tom's note to `data/art-notes.json` and drops the picture. Spend counter is an estimate ($0.04 per picture, $0.01 per reference).

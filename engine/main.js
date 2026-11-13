@@ -240,10 +240,25 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// Installed areas: data/areas/index.json lists them, each is data/areas/<id>.json. Fetched before the first frame so a game never starts without them.
+// If the list cannot be read (offline, or no list yet) the game starts with the built-in grey areas only.
+let areasReady=false, areasNote='';
+async function loadInstalledAreas() {
+  const r=await fetch('data/areas/index.json?t='+Date.now(),{cache:'no-store'});
+  if(!r.ok) throw new Error('index.json '+r.status);
+  const idx=await r.json(), tag=idx.tag||'0', list=[];
+  for(const id of (idx.areas||[])) {
+    const a=await fetch('data/areas/'+id+'.json?v='+tag);
+    if(!a.ok) throw new Error(id+'.json '+a.status);
+    list.push(await a.json());
+  }
+  installAreas(list,tag);
+}
 addEventListener('resize',layout);
 layout();
 document.documentElement.classList.add('js-running');
-requestAnimationFrame(frame);
+loadInstalledAreas().catch(e=>{ areasNote=String(e.message||e); console.warn('installed areas not loaded:',areasNote); })
+  .finally(()=>{ areasReady=true; requestAnimationFrame(frame); });
 
 // Debug handle for tools/smoke.py and for checking a build by hand in the console.
 window.__FFIV={
@@ -251,6 +266,8 @@ window.__FFIV={
   get area(){ return game.area?game.area.id:null; },
   get walker(){ const p=walkerPos(); return {x:game.walker.x,y:game.walker.y,rx:p.x,ry:p.y}; },
   get landscape(){ return isLandscape(); },
+  get ready(){ return areasReady; },
+  get areasNote(){ return areasNote; },
   get busy(){ return !!game.trans||game.walker.moving||!!(game.path&&game.path.length)||game.mode==='battle'||game.mode==='card'||game.mode==='closeup'||!!game.scene; },
   get faults(){ return faults.slice(); },
   get problems(){ return validateWorld(); },

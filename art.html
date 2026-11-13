@@ -34,10 +34,12 @@ button:disabled{opacity:.4}
 #status{position:sticky;top:0;background:#0e1311;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;min-height:36px;z-index:2}
 #status.err{color:#ffb4a8}
 .muted{color:#9fb0a8;font-size:12px}
+.nav{font-size:12px;margin:0 0 8px}.nav a{color:#9fd6bf;margin-right:10px}
 </style>
 </head>
 <body>
 <h1>Art Library</h1>
+<div class="nav"><a href="heads.html">Head Sizes</a> <a href="portraits.html">Portraits</a> <a href="areas.html">Areas</a> <a href="index.html">Game</a></div>
 <div id="status" role="status">Ready.</div>
 
 <h2>1. Setup</h2>
@@ -82,16 +84,13 @@ button:disabled{opacity:.4}
   <div class="row"><button id="approve" class="go">APPROVE</button><button id="reject" class="no">REJECT</button></div>
 </div>
 
+<script src="admin-lib.js"></script>
 <script>
 'use strict';
 // Art Library (Build 1d.1). One page, no build step. Keys live in this phone's localStorage (prefix ffiv-) and are never written to the repo.
-const $=id=>document.getElementById(id);
-const LS={get:k=>{try{return localStorage.getItem('ffiv-'+k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem('ffiv-'+k,v)}catch(e){}}};
 const COST_IMAGE=0.04, COST_REF=0.01;
 const MAX_KEPT=5;
 const state={items:[],ingame:{installed:{}},notes:{notes:[]},sel:null,shots:[],shot:null,busy:false};
-
-function say(msg,err){ const s=$('status'); s.textContent=msg; s.className=err?'err':''; }
 
 // ---------- setup ----------
 function loadSetup(){
@@ -196,35 +195,8 @@ async function upload(f){
   await loadShots(); say('Uploaded. Tap it, then APPROVE or REJECT.');
 }
 
-// ---------- GitHub ----------
-function ghHeaders(){ return {'Authorization':'Bearer '+LS.get('gh-token'),'Accept':'application/vnd.github+json','Content-Type':'application/json'}; }
-function repoUrl(path){ return 'https://api.github.com/repos/'+LS.get('repo')+'/contents/'+path.split('/').map(encodeURIComponent).join('/'); }
-async function ghGet(path){
-  const r=await fetch(repoUrl(path)+'?ref=main&t='+Date.now(),{headers:ghHeaders()});
-  if(r.status===404) return null;
-  if(!r.ok) throw new Error('GitHub said '+r.status+' reading '+path);
-  return r.json();
-}
-async function ghPut(path,b64,message){
-  const cur=await ghGet(path);
-  const body={message,content:b64,branch:'main'}; if(cur&&cur.sha) body.sha=cur.sha;
-  const r=await fetch(repoUrl(path),{method:'PUT',headers:ghHeaders(),body:JSON.stringify(body)});
-  if(!r.ok){ const t=await r.text(); throw new Error('GitHub said '+r.status+' writing '+path+': '+t.slice(0,160)); }
-  return r.json();
-}
-const toB64=s=>btoa(unescape(encodeURIComponent(s)));
-function blobToB64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); }); }
+// ---------- GitHub (shared helpers are in admin-lib.js) ----------
 function extOf(blob){ const t=(blob.type||'').toLowerCase(); return t.includes('jpeg')||t.includes('jpg')?'jpg':t.includes('webp')?'webp':'png'; }
-async function readJson(path,fallback){
-  const cur=await ghGet(path); if(!cur) return fallback;
-  try{ return JSON.parse(decodeURIComponent(escape(atob(cur.content.replace(/\n/g,''))))); }catch(e){ return fallback; }
-}
-function needGh(){ if(!LS.get('gh-token')||!LS.get('repo')){ say('Enter the GitHub token and repo in Setup first.',true); return false; } return true; }
-async function testGh(){
-  if(!needGh()) return;
-  try{ const r=await fetch('https://api.github.com/repos/'+LS.get('repo'),{headers:ghHeaders()}); if(!r.ok) throw new Error('GitHub said '+r.status); const j=await r.json(); say('GitHub works. Push access: '+(j.permissions&&j.permissions.push?'yes':'NO, the token cannot write.'),!(j.permissions&&j.permissions.push)); }
-  catch(e){ say(e.message,true); }
-}
 function curShot(){ return state.shots.find(s=>s.key===state.shot)||null; }
 async function approve(){
   if(state.busy||!needGh()) return; const s=curShot(); if(!s){ say('Tap a picture first.',true); return; }

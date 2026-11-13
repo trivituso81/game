@@ -45,7 +45,7 @@ def wait_port(port, timeout=10):
 
 
 def wait_idle(page):
-    page.wait_for_function('() => window.__FFIV && !window.__FFIV.busy', timeout=30000)
+    page.wait_for_function('() => window.__FFIV && __FFIV.ready && !window.__FFIV.busy', timeout=30000)
     time.sleep(0.05)
 
 
@@ -201,7 +201,7 @@ def run_view(browser, name, w, h):
     page.on('pageerror', lambda e: errors.append('pageerror: ' + str(e)))
     page.on('console', lambda m: errors.append('console: ' + m.text) if m.type == 'error' else None)
     page.goto(f'http://127.0.0.1:{PORT}/index.html')
-    page.wait_for_function('() => window.__FFIV !== undefined', timeout=15000)
+    page.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
 
     check(f'{name}: boots to title', page.evaluate('() => __FFIV.mode') == 'title')
     check(f'{name}: layout follows viewport', page.evaluate('() => __FFIV.landscape') == (w > h))

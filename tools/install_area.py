@@ -17,8 +17,9 @@ spec.json:
   "spawn": {"x":1,"y":1}
 }
 What it does: checks the spec against the same rules as validateWorld() in engine/world.js, saves the picture as art/areas/<id>.png
-at 2x the logical size, writes data/areas/<id>.json, regenerates engine/areas-data.js from every file in data/areas/, bumps ART_TAG
-and the ?v= tag on that script in index.html. A replaced area's old picture is purged in the same run.
+at 2x the logical size, writes data/areas/<id>.json, and rewrites data/areas/index.json (the list of installed ids and a cache tag) from every
+area file. The game fetches that list at boot; the Area editor (areas.html) updates the same list from the phone. A replaced area's old picture
+is purged in the same run. index.json is the list, not an area.
 """
 import argparse
 import glob
@@ -49,9 +50,11 @@ def story_scenes(root):
 
 def check(spec, root, installed):
     out = []
+    if not re.fullmatch(r'[a-z0-9-]+', str(spec.get('id', ''))) or spec.get('id') == 'index':
+        out.append('id must be made of a-z, 0-9 and dashes, and cannot be "index"')
     rows = spec.get('mask') or []
     if not rows:
-        return ['mask is empty']
+        return out + ['mask is empty']
     w = len(rows[0])
     for i, r in enumerate(rows):
         if len(r) != w:
@@ -59,7 +62,7 @@ def check(spec, root, installed):
         for c in r:
             if c not in LEGEND:
                 out.append(f'mask row {i} has unknown character {c!r}')
-    if out:
+    if any(o.startswith('mask') for o in out):
         return out
     h = len(rows)
     ids = builtin_ids(root) | set(installed) | {spec['id']}
@@ -98,27 +101,27 @@ def check(spec, root, installed):
     return out
 
 
+def area_files(root):
+    return [f for f in sorted(glob.glob(os.path.join(root, 'data/areas/*.json'))) if os.path.basename(f) != 'index.json']
+
+
 def regenerate(root):
-    files = sorted(glob.glob(os.path.join(root, 'data/areas/*.json')))
-    areas = [json.load(open(f)) for f in files]
+    """Writes data/areas/index.json: the list of installed ids plus a cache tag. The game fetches this list at boot."""
+    areas = [json.load(open(f)) for f in area_files(root)]
     digest = hashlib.sha1(''.join(json.dumps(a, sort_keys=True) for a in areas).encode())
     for a in areas:
         p = os.path.join(root, a['art']) if a.get('art') else None
         if p and os.path.exists(p):
             digest.update(open(p, 'rb').read())
-    tag = '1d1' if not areas else digest.hexdigest()[:6]
-    body = ("'use strict';\n// engine/areas-data.js: written by tools/install_area.py. Do not edit by hand.\n"
-            f"const ART_TAG='{tag}';\nconst INSTALLED_AREAS={json.dumps(areas, indent=1)};\n")
-    open(os.path.join(root, 'engine/areas-data.js'), 'w').write(body)
-    ip = os.path.join(root, 'index.html')
-    s = open(ip).read()
-    s = re.sub(r'(engine/areas-data\.js\?v=)[A-Za-z0-9]+', r'\g<1>' + tag, s)
-    open(ip, 'w').write(s)
+    tag = '0' if not areas else digest.hexdigest()[:6]
+    os.makedirs(os.path.join(root, 'data/areas'), exist_ok=True)
+    with open(os.path.join(root, 'data/areas/index.json'), 'w') as f:
+        json.dump({'tag': tag, 'areas': [a['id'] for a in areas]}, f, indent=1); f.write('\n')
     return tag
 
 
 def installed_ids(root):
-    return {os.path.splitext(os.path.basename(f))[0] for f in glob.glob(os.path.join(root, 'data/areas/*.json'))}
+    return {os.path.splitext(os.path.basename(f))[0] for f in area_files(root)}
 
 
 def purge(root, area_id):
@@ -142,7 +145,7 @@ def main():
     if a.remove:
         if not purge(root, a.remove):
             raise SystemExit(f'{a.remove} is not installed')
-        print(f'removed {a.remove}; ART_TAG now {regenerate(root)}')
+        print(f'removed {a.remove}; cache tag now {regenerate(root)}')
         return
     if not a.spec:
         ap.error('give a spec file or --remove')
@@ -169,7 +172,7 @@ def main():
     os.makedirs(os.path.join(root, 'data/areas'), exist_ok=True)
     with open(os.path.join(root, 'data/areas', spec['id'] + '.json'), 'w') as f:
         json.dump(data, f, indent=1); f.write('\n')
-    print(f'installed {spec["id"]} ({w}x{h} tiles) with {art}; ART_TAG now {regenerate(root)}')
+    print(f'installed {spec["id"]} ({w}x{h} tiles) with {art}; cache tag now {regenerate(root)}')
 
 
 if __name__ == '__main__':

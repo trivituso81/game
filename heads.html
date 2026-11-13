@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161d1b">
+<title>Head Sizes</title>
+<link rel="icon" href="data:,">
+<script src="admin-lib.js"></script>
+<style id="css"></style>
+<style>
+canvas{background:#1b2321;border-radius:8px;width:100%;max-width:560px;display:block}
+.pair{display:grid;grid-template-columns:1fr 70px 70px 40px;gap:6px;align-items:center;margin-bottom:6px}
+.pair input{padding:7px}
+.pair button{margin:0;padding:8px}
+.big{font-size:22px;font-weight:700}
+input[type=range]{padding:0}
+</style>
+</head>
+<body>
+<script>document.getElementById('css').textContent=ADMIN_CSS; document.body.insertAdjacentHTML('afterbegin','<h1>Head Sizes</h1>'+ADMIN_NAV+'<div id="status" role="status">Ready.</div>');</script>
+
+<div class="box">
+  <b>The one head multiplier</b> <span class="muted">(1.00 leaves heads alone; every character uses it)</span>
+  <div class="big" id="headval">1.00</div>
+  <input id="head" type="range" min="0.6" max="2" step="0.05" value="1" aria-label="Head multiplier">
+  <label for="frac">Share of the figure counted as the head (top)</label>
+  <div><b id="fracval">30%</b></div>
+  <input id="frac" type="range" min="0.15" max="0.45" step="0.01" value="0.3" aria-label="Head share">
+</div>
+
+<h2>Preview</h2>
+<div class="box">
+  <label for="who">Character (a baked sheet is used if one exists)</label>
+  <select id="who"></select>
+  <canvas id="pv" width="560" height="360" aria-label="Preview"></canvas>
+  <p class="muted" id="pvnote"></p>
+</div>
+
+<h2>Heights (pixels, tallest frame)</h2>
+<div class="box">
+  <div class="pair"><b>Default</b><input id="dbattle" type="number" min="8" max="200" aria-label="Default battle height"><input id="dwalk" type="number" min="8" max="200" aria-label="Default walk height"><span></span></div>
+  <div class="pair muted"><span></span><span>battle</span><span>walk</span><span></span></div>
+  <div id="rows"></div>
+  <label for="newid">Add a character with its own heights (its name, as in its bake spec)</label>
+  <div class="row"><input id="newid" placeholder="name" style="flex:1"><button id="add" class="alt">ADD</button></div>
+</div>
+
+<div class="box">
+  <div class="row"><button id="save" class="go">SAVE TO GAME</button><button id="reload" class="alt">RELOAD SAVED</button><button id="testgh" class="alt">TEST GITHUB</button></div>
+  <p class="muted">Saving writes tools/sprite-bake/heights.json. The new sizes show up in the game after Claude re-bakes the sheets.</p>
+</div>
+
+<script>
+'use strict';
+// Head Sizes (Build 1d.2). Edits the one head multiplier, the head share, the default heights and per-character heights in tools/sprite-bake/heights.json.
+const PATH='tools/sprite-bake/heights.json';
+const st={data:null,saved:null,chars:[],imgs:{}};
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const num=v=>{ const n=Number(v); return Number.isFinite(n)?n:NaN; };
+
+function blank(){ return {note:'',head:1.0,head_frac:0.3,default:{battle:56,walk:28},heights:{}}; }
+async function load(){
+  let d=null;
+  if(LS.get('gh-token')&&LS.get('repo')){ try{ d=await readJson(PATH,null); }catch(e){ say(e.message,true); } }
+  if(!d) d=await siteJson(PATH);
+  st.saved=d||blank(); st.data=JSON.parse(JSON.stringify(st.saved));
+  st.data.default=st.data.default||{battle:56,walk:28}; st.data.heights=st.data.heights||{};
+  st.chars=[];
+  if(LS.get('gh-token')&&LS.get('repo')){
+    try{
+      const r=await fetch(repoUrl('art/chars')+'?ref=main&t='+Date.now(),{headers:ghHeaders()});
+      if(r.ok){ const list=await r.json(); if(Array.isArray(list)) st.chars=[...new Set(list.map(f=>f.name).filter(n=>/-battle\.png$/.test(n)).map(n=>n.replace(/-battle\.png$/,'')))]; }
+    }catch(e){}
+  }
+  for(const n of Object.keys(st.data.heights)) if(!st.chars.includes(n)) st.chars.push(n);
+  fill(); say('Loaded. Move the sliders, then SAVE TO GAME.');
+}
+function fill(){
+  $('head').value=st.data.head; $('frac').value=st.data.head_frac;
+  $('dbattle').value=st.data.default.battle; $('dwalk').value=st.data.default.walk;
+  const sel=$('who'); const keep=sel.value; sel.innerHTML='<option value="">Grey placeholder</option>';
+  for(const n of st.chars){ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); }
+  if(st.chars.includes(keep)) sel.value=keep;
+  rows(); show();
+}
+function rows(){
+  const box=$('rows'); box.innerHTML='';
+  for(const [name,h] of Object.entries(st.data.heights)){
+    const d=document.createElement('div'); d.className='pair'; d.dataset.name=name;
+    d.innerHTML='<span></span><input type="number" min="8" max="200" data-k="battle" placeholder="def."><input type="number" min="8" max="200" data-k="walk" placeholder="def."><button class="no" aria-label="Remove">X</button>';
+    d.firstChild.textContent=name;
+    d.querySelectorAll('input').forEach(i=>{ i.value=h[i.dataset.k]===undefined?'':h[i.dataset.k]; i.oninput=()=>{ const v=i.value===''?undefined:num(i.value); if(v===undefined) delete h[i.dataset.k]; else h[i.dataset.k]=v; draw(); }; });
+    d.querySelector('button').onclick=()=>{ delete st.data.heights[name]; rows(); draw(); };
+    box.appendChild(d);
+  }
+}
+function show(){ $('headval').textContent=Number(st.data.head).toFixed(2); $('fracval').textContent=Math.round(st.data.head_frac*100)+'%'; draw(); }
+function heightsFor(name){ const h=st.data.heights[name]||{}, d=st.data.default; return {battle:h.battle!==undefined?h.battle:d.battle, walk:h.walk!==undefined?h.walk:d.walk}; }
+
+// Preview: the figure at the battle height and at the walk height, side by side, on a ruler. The head part (top share) is scaled by the multiplier.
+function sheetImage(name,kind){
+  const k=name+'-'+kind; let im=st.imgs[k];
+  if(!im){ im=st.imgs[k]=new Image(); im.onload=()=>draw(); im.onerror=()=>{ im.bad=true; draw(); }; im.src='art/chars/'+name+'-'+kind+'.png?t='+Date.now(); }
+  return im.complete&&im.naturalWidth>0&&!im.bad?im:null;
+}
+// Alpha bounds of the first frame of a baked sheet (the figure without its empty margin).
+function figureBox(im,cell){
+  if(im.box) return im.box;
+  const t=document.createElement('canvas'); t.width=cell; t.height=cell; const g=t.getContext('2d'); g.drawImage(im,0,0,cell,cell,0,0,cell,cell);
+  const d=g.getImageData(0,0,cell,cell).data; let x0=cell,y0=cell,x1=-1,y1=-1;
+  for(let y=0;y<cell;y++) for(let x=0;x<cell;x++) if(d[(y*cell+x)*4+3]>8){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+  return im.box=x1<0?{x:0,y:0,w:cell,h:cell}:{x:x0,y:y0,w:x1-x0+1,h:y1-y0+1};
+}
+// Draws one figure standing on y=base, tallest point `h` pixels up, like the baker: the head part is scaled by the multiplier, then the whole figure is fitted to the height.
+function figure(c,x,base,h,kind,name){
+  const mult=st.data.head, frac=st.data.head_frac;
+  const im=name?sheetImage(name,kind):null;
+  if(im){
+    // The sheet was baked with the saved multiplier, so the head is changed by new over saved.
+    const cell=kind==='battle'?64:32, rel=mult/(st.saved.head||1), b=figureBox(im,cell), hh=Math.max(1,Math.round(b.h*frac)), bodyH=b.h-hh;
+    const s=h/(bodyH+hh*rel);
+    c.imageSmoothingEnabled=false;
+    c.drawImage(im,b.x,b.y+hh,b.w,bodyH,x-b.w*s/2,base-bodyH*s,b.w*s,bodyH*s);
+    c.drawImage(im,b.x,b.y,b.w,hh,x-b.w*s*rel/2,base-bodyH*s-hh*s*rel,b.w*s*rel,hh*s*rel);
+    return;
+  }
+  const k=h/(h*(1-frac)+h*frac*mult), head=h*frac*mult*k, bodyH=h*(1-frac)*k, bw=h*0.32*k;
+  c.fillStyle='#6e726f'; c.fillRect(x-bw/2,base-bodyH,bw,bodyH);
+  c.fillStyle='#b9bdb9'; c.beginPath(); c.arc(x,base-bodyH-head/2,head/2,0,Math.PI*2); c.fill();
+}
+function draw(){
+  const cv=$('pv'), c=cv.getContext('2d'), name=$('who').value;
+  c.clearRect(0,0,cv.width,cv.height);
+  const hs=heightsFor(name), base=cv.height-24, scale=Math.min(4,(cv.height-60)/Math.max(hs.battle,hs.walk,1));
+  c.strokeStyle='#3a4a45'; c.lineWidth=1; c.fillStyle='#9fb0a8'; c.font='11px monospace';
+  c.beginPath(); c.moveTo(0,base+.5); c.lineTo(cv.width,base+.5); c.stroke();
+  c.save(); c.translate(0,0);
+  figure(c,cv.width*0.3,base,hs.battle*scale,'battle',name); figure(c,cv.width*0.7,base,hs.walk*scale,'walk',name);
+  c.restore();
+  c.fillText('battle '+hs.battle+' px',cv.width*0.3-36,cv.height-8); c.fillText('walk '+hs.walk+' px',cv.width*0.7-30,cv.height-8);
+  const hasBattle=name&&sheetImage(name,'battle'), hasWalk=name&&sheetImage(name,'walk');
+  $('pvnote').textContent=name?(hasBattle||hasWalk?'Baked sheet shown. The head is changed by the ratio of the new multiplier to the saved one; the exact result comes at the next bake.':'No baked sheet found for '+name+' yet, so a grey placeholder is shown.'):'Grey placeholder. Pick a character with a baked sheet to see the real one.';
+}
+function problems(){
+  const d=st.data, out=[];
+  if(!(d.head>=0.5&&d.head<=2.5)) out.push('head multiplier must be between 0.5 and 2.5');
+  if(!(d.head_frac>=0.1&&d.head_frac<=0.5)) out.push('head share must be between 10 and 50 percent');
+  for(const k of ['battle','walk']) if(!(d.default[k]>=8&&d.default[k]<=200)) out.push('default '+k+' height must be between 8 and 200');
+  for(const [n,h] of Object.entries(d.heights)) for(const k of Object.keys(h)) if(!(h[k]>=8&&h[k]<=200)) out.push(n+' '+k+' height must be between 8 and 200');
+  return out;
+}
+let busy=false;
+async function save(){
+  if(busy||!needGh()) return;
+  const p=problems(); if(p.length){ say(p[0],true); return; }
+  busy=true; say('Saving to the game repo...');
+  try{
+    const out=Object.assign({},st.data);
+    await ghPut(PATH,toB64(JSON.stringify(out,null,2)+'\n'),'Heads: heights and head multiplier');
+    st.saved=JSON.parse(JSON.stringify(out)); say('Saved. Claude re-bakes the sheets to apply it.');
+  }catch(e){ say(e.message,true); }
+  finally{ busy=false; }
+}
+$('head').oninput=e=>{ st.data.head=Number(e.target.value); show(); };
+$('frac').oninput=e=>{ st.data.head_frac=Number(e.target.value); show(); };
+$('dbattle').oninput=e=>{ st.data.default.battle=num(e.target.value); draw(); };
+$('dwalk').oninput=e=>{ st.data.default.walk=num(e.target.value); draw(); };
+$('who').onchange=()=>draw();
+$('add').onclick=()=>{ const id=$('newid').value.trim().toLowerCase(); if(!/^[a-z0-9-]+$/.test(id)){ say('Use letters, numbers and dashes for the name.',true); return; } if(!st.data.heights[id]) st.data.heights[id]={}; if(!st.chars.includes(id)) st.chars.push(id); $('newid').value=''; fill(); $('who').value=id; draw(); };
+$('save').onclick=save; $('reload').onclick=load; $('testgh').onclick=testGh;
+load();
+window.__HEADS={st,save,problems};
+</script>
+</body>
+</html>

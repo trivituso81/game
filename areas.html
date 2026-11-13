@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161d1b">
+<title>Area editor</title>
+<link rel="icon" href="data:,">
+<script src="engine/world.js"></script>
+<script src="engine/battle.js"></script>
+<script src="engine/story.js"></script>
+<script src="engine/areacheck.js"></script>
+<!-- admin-lib.js goes after the engine files on purpose: battle.js also defines say(), and the admin page needs its own. -->
+<script src="admin-lib.js"></script>
+<style id="css"></style>
+<style>
+#wrap{overflow:auto;max-height:68vh;border-radius:8px;background:#0e1311}
+#cv{display:block;touch-action:none;image-rendering:pixelated}
+#cv.scroll{touch-action:auto}
+.tools{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.tools button{margin:0;padding:9px 2px;font-size:13px}
+.legend{font-size:12px;color:#9fb0a8;margin:6px 0}
+#problems{font-size:13px}#problems div{color:#ffb4a8;margin:2px 0}#problems .ok{color:#8fd8a8}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+</style>
+</head>
+<body>
+<script>document.getElementById('css').textContent=ADMIN_CSS; document.body.insertAdjacentHTML('afterbegin','<h1>Area editor</h1>'+ADMIN_NAV+'<div id="status" role="status">Loading...</div>');</script>
+
+<div class="box">
+  <label for="area">Area</label>
+  <select id="area"></select>
+  <details style="margin-top:8px"><summary class="muted">New area (no picture)</summary>
+    <div class="f2"><div><label for="nid">Id (a-z, 0-9, dashes)</label><input id="nid"></div><div><label for="nname">Name shown in game</label><input id="nname"></div>
+    <div><label for="nw">Width in tiles</label><input id="nw" type="number" value="20" min="5" max="80"></div><div><label for="nh">Height in tiles</label><input id="nh" type="number" value="20" min="5" max="80"></div></div>
+    <label><input id="nindoor" type="checkbox" style="width:auto"> Indoor</label>
+    <button id="mk" class="alt">CREATE</button>
+  </details>
+</div>
+
+<div id="editor" hidden>
+<div class="box">
+  <div class="tools" id="tools">
+    <button data-tool="#" class="on">WALL</button><button data-tool=".">FLOOR</button><button data-tool="D">DOOR</button><button data-tool="M">MAT</button><button data-tool="E">EDGE</button>
+    <button data-tool="L">LOCKED</button><button data-tool="spawn">SPAWN</button><button data-tool="trigger">GO TILE</button><button data-tool="monster">FIGHT</button><button data-tool="pick">PICK</button>
+  </div>
+  <div class="legend">WALL blocks. FLOOR walks. DOOR goes in. MAT goes out. EDGE goes to the next area. LOCKED is a wall until its flag is set.</div>
+  <div class="f2"><div><label for="scene">GO TILE scene</label><select id="scene"></select></div><div><label for="kind">FIGHT kind</label><select id="kind"></select></div></div>
+  <div class="row"><button id="scrollmode" class="alt">SCROLL MODE: OFF</button><label style="margin:12px 0 0">Tile size <input id="zoom" type="range" min="8" max="40" value="16" style="width:120px;vertical-align:middle;padding:0"></label></div>
+</div>
+<div id="wrap"><canvas id="cv" aria-label="Area map"></canvas></div>
+<div class="box" id="panel" style="margin-top:10px"></div>
+<div class="box"><b>Problems</b><div id="problems"></div>
+  <div class="row"><button id="save" class="go">SAVE TO GAME</button><button id="revert" class="alt">UNDO ALL CHANGES</button><button id="testgh" class="alt">TEST GITHUB</button></div>
+  <p class="muted">Saving writes data/areas/&lt;id&gt;.json and updates data/areas/index.json. The game reads both when it starts, so reload the game to see the change.</p>
+</div>
+</div>
+
+<script>
+'use strict';
+// Area editor (Build 1d.2). Paints the walk mask of an area over its picture, sets doors, mats, edges, locked doors (where they lead), the spawn point,
+// GO tiles and fights, checks the result with checkAreaSpec() (engine/areacheck.js, the same rules the installer uses) and saves to data/areas/<id>.json.
+const BUILTIN=new Set(Object.keys(AREAS));          // built-in grey areas, captured before installed areas replace any of them
+const TINT={'#':'rgba(0,0,0,.5)','D':'rgba(70,130,230,.55)','M':'rgba(60,200,200,.55)','E':'rgba(230,200,70,.55)','L':'rgba(200,110,230,.6)'};
+const BASE={'#':'#4a4f4c','.':'#8d938f'};
+const st={spec:null,orig:'',installed:new Set(),tool:'#',sel:null,ts:16,scroll:false,drag:false,imgs:{}};
+let busy=false;
+const clone=o=>JSON.parse(JSON.stringify(o));
+const knownFlags=()=>{ const s=new Set(); for(const sc of Object.values(SCENES)) for(const step of sc.steps) if(step.op==='flag') s.add(step.name); return [...s]; };
+
+// ---------- load ----------
+async function loadAll(keepId){
+  const auth=LS.get('gh-token')&&LS.get('repo');
+  const get=async p=>{ if(auth){ try{ return await readJson(p,null); }catch(e){ say(e.message,true); } } return siteJson(p); };
+  const idx=(await get('data/areas/index.json'))||{tag:'0',areas:[]}, list=[];
+  for(const id of idx.areas){ const a=await get('data/areas/'+id+'.json'); if(a) list.push(a); }
+  installAreas(list,idx.tag); st.installed=new Set(list.map(a=>a.id));
+  fillPicker(keepId); fillSelects();
+  say('Pick an area to edit.');
+}
+function fillPicker(keep){
+  const s=$('area'); s.innerHTML='<option value="">Choose...</option>';
+  for(const id of Object.keys(AREAS)){ const o=document.createElement('option'); o.value=id; o.textContent=AREAS[id].name+' ('+id+')'+(st.installed.has(id)?' saved':' built-in'); s.appendChild(o); }
+  if(keep&&AREAS[keep]) s.value=keep;
+}
+function fillSelects(){
+  $('scene').innerHTML=Object.keys(SCENES).map(n=>'<option>'+n+'</option>').join('');
+  $('kind').innerHTML=Object.keys(ENEMY_TYPES).map(n=>'<option>'+n+'</option>').join('');
+}
+function open(id){
+  if(!id||!AREAS[id]){ $('editor').hidden=true; return; }
+  st.spec=areaToSpec(AREAS[id]); st.orig=JSON.stringify(st.spec); st.sel=null;
+  $('editor').hidden=false; resize(); refresh();
+  say('Editing '+st.spec.name+'. Pick a tool, then tap or drag on the map.');
+}
+
+// ---------- drawing ----------
+function artImg(){
+  const p=st.spec.art; if(!p) return null;
+  let im=st.imgs[p]; if(!im){ im=st.imgs[p]=new Image(); im.onload=()=>draw(); im.src=p+'?v='+ART_TAG; }
+  return im.complete&&im.naturalWidth>0?im:null;
+}
+function resize(){
+  if(!st.spec) return;
+  const cv=$('cv'), w=st.spec.mask[0].length, h=st.spec.mask.length;
+  st.ts=Number($('zoom').value);
+  cv.width=w*st.ts; cv.height=h*st.ts; cv.style.width=cv.width+'px'; cv.style.height=cv.height+'px';
+  draw();
+}
+function draw(){
+  if(!st.spec) return;
+  const cv=$('cv'), c=cv.getContext('2d'), s=st.spec, T=st.ts, w=s.mask[0].length, h=s.mask.length, im=artImg();
+  c.clearRect(0,0,cv.width,cv.height);
+  if(im) c.drawImage(im,0,0,cv.width,cv.height);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const ch=s.mask[y][x];
+    if(!im){ c.fillStyle=BASE[ch]||BASE['.']; c.fillRect(x*T,y*T,T,T); }
+    if(TINT[ch]){ c.fillStyle=TINT[ch]; c.fillRect(x*T,y*T,T,T); }
+    if(ch==='#'){ c.strokeStyle='rgba(255,90,90,.9)'; c.lineWidth=1; c.strokeRect(x*T+2.5,y*T+2.5,T-5,T-5); }
+    if(ch!=='#'&&ch!=='.'&&T>=12){ c.fillStyle='#fff'; c.font='bold '+Math.floor(T*0.6)+'px monospace'; c.textAlign='center'; c.textBaseline='middle'; c.fillText(ch,x*T+T/2,y*T+T/2); }
+  }
+  c.strokeStyle='rgba(255,255,255,.14)'; c.lineWidth=1; c.beginPath();
+  for(let x=0;x<=w;x++){ c.moveTo(x*T+.5,0); c.lineTo(x*T+.5,h*T); }
+  for(let y=0;y<=h;y++){ c.moveTo(0,y*T+.5); c.lineTo(w*T,y*T+.5); }
+  c.stroke();
+  const mark=(x,y,text,color)=>{ c.fillStyle=color; c.beginPath(); c.arc(x*T+T/2,y*T+T/2,T*0.34,0,Math.PI*2); c.fill(); c.fillStyle='#000'; c.font='bold '+Math.max(8,Math.floor(T*0.5))+'px monospace'; c.textAlign='center'; c.textBaseline='middle'; c.fillText(text,x*T+T/2,y*T+T/2); };
+  for(const t of s.triggers||[]) mark(t.x,t.y,'G','#e6dc9a');
+  for(const m of s.monsters||[]) mark(m.x,m.y,m.kind==='boss'?'B':'F','#f09a6a');
+  mark(s.spawn.x,s.spawn.y,'S','#8fe0a8');
+  if(st.sel){ c.strokeStyle='#ffe14d'; c.lineWidth=2; c.strokeRect(st.sel.x*T+1,st.sel.y*T+1,T-2,T-2); }
+}
+
+// ---------- editing ----------
+const at=(arr,x,y)=>(arr||[]).findIndex(o=>o.x===x&&o.y===y);
+function defaultTarget(){ const id=Object.keys(AREAS).find(k=>k!==st.spec.id)||st.spec.id; return {to:id,spawn:{x:AREAS[id].spawn.x,y:AREAS[id].spawn.y}}; }
+function setTile(x,y,ch){
+  const s=st.spec, row=[...s.mask[y]]; row[x]=ch; s.mask[y]=row.join('');
+  s.portals=s.portals||[]; s.locks=s.locks||[];
+  if(!AREA_PORTAL_CHARS.includes(ch)){ const i=at(s.portals,x,y); if(i>=0) s.portals.splice(i,1); }
+  if(ch!=='L'){ const i=at(s.locks,x,y); if(i>=0) s.locks.splice(i,1); }
+  if(AREA_PORTAL_CHARS.includes(ch)&&at(s.portals,x,y)<0) s.portals.push(Object.assign({x,y},defaultTarget()));
+  if(ch==='L'&&at(s.locks,x,y)<0) s.locks.push({x,y,flag:knownFlags()[0]||''});
+}
+function applyTool(x,y,first){
+  const s=st.spec, t=st.tool;
+  st.sel={x,y};
+  if('#.DMEL'.includes(t)&&t.length===1){ if(s.mask[y][x]!==t) setTile(x,y,t); }
+  else if(!first){ /* only mask tools paint while dragging */ }
+  else if(t==='spawn') s.spawn={x,y};
+  else if(t==='trigger'){ s.triggers=s.triggers||[]; const i=at(s.triggers,x,y); if(i>=0) s.triggers.splice(i,1); else s.triggers.push({x,y,scene:$('scene').value}); }
+  else if(t==='monster'){ s.monsters=s.monsters||[]; const i=at(s.monsters,x,y); if(i>=0) s.monsters.splice(i,1); else { let n=1; while(s.monsters.some(m=>m.id==='m'+n)) n++; s.monsters.push({id:'m'+n,kind:$('kind').value,x,y}); } }
+  refresh();
+}
+function tileAt(e){
+  const cv=$('cv'), r=cv.getBoundingClientRect(), w=st.spec.mask[0].length, h=st.spec.mask.length;
+  const x=Math.floor((e.clientX-r.left)/r.width*w), y=Math.floor((e.clientY-r.top)/r.height*h);
+  return x>=0&&y>=0&&x<w&&y<h?{x,y}:null;
+}
+const cv0=$('cv');
+cv0.addEventListener('pointerdown',e=>{ if(st.scroll||!st.spec) return; const p=tileAt(e); if(!p) return; cv0.setPointerCapture(e.pointerId); st.drag=true; applyTool(p.x,p.y,true); });
+cv0.addEventListener('pointermove',e=>{ if(!st.drag) return; const p=tileAt(e); if(p&&(!st.sel||p.x!==st.sel.x||p.y!==st.sel.y)) applyTool(p.x,p.y,false); });
+cv0.addEventListener('pointerup',()=>{ st.drag=false; });
+cv0.addEventListener('pointercancel',()=>{ st.drag=false; });
+
+function env(){ return {ids:Object.keys(AREAS),scenes:Object.keys(SCENES),kinds:Object.keys(ENEMY_TYPES),maskOf:id=>AREAS[id]?AREAS[id].grid.map(r=>r.join('')):null}; }
+function problems(){ return checkAreaSpec(st.spec,env()); }
+function refresh(){ draw(); panel(); const p=problems(); $('problems').innerHTML=p.length?p.map(x=>'<div></div>').join(''):'<span class="ok">No problems.</span>'; if(p.length) [...$('problems').children].forEach((d,i)=>d.textContent=p[i]); }
+
+function panel(){
+  const box=$('panel'), s=st.spec, sel=st.sel;
+  if(!sel){ box.innerHTML='<span class="muted">Tap a tile to see and change what it does.</span>'; return; }
+  const {x,y}=sel, ch=s.mask[y][x], names={'#':'WALL','.':'FLOOR','D':'DOOR','M':'MAT','E':'EDGE','L':'LOCKED DOOR'};
+  box.innerHTML='<b></b><div id="pbody"></div>'; box.firstChild.textContent='Tile '+x+','+y+': '+names[ch];
+  const body=box.querySelector('#pbody');
+  const add=(html)=>{ const d=document.createElement('div'); d.innerHTML=html; body.appendChild(d); return d; };
+  const pi=at(s.portals,x,y);
+  if(pi>=0){
+    const p=s.portals[pi], d=add('<label>Leads to</label><select data-f="to"></select><div class="f2"><div><label>Arrives at x</label><input data-f="sx" type="number"></div><div><label>Arrives at y</label><input data-f="sy" type="number"></div></div><button class="alt" data-f="use">USE THAT AREA\'S SPAWN POINT</button>');
+    const sel2=d.querySelector('[data-f=to]'); sel2.innerHTML=Object.keys(AREAS).map(id=>'<option value="'+id+'">'+AREAS[id].name+' ('+id+')</option>').join('');
+    if(!AREAS[p.to]) sel2.insertAdjacentHTML('beforeend','<option value="'+p.to+'">'+p.to+' (unknown)</option>'); sel2.value=p.to;
+    d.querySelector('[data-f=sx]').value=p.spawn.x; d.querySelector('[data-f=sy]').value=p.spawn.y;
+    sel2.onchange=()=>{ p.to=sel2.value; if(AREAS[p.to]) p.spawn={x:AREAS[p.to].spawn.x,y:AREAS[p.to].spawn.y}; panel(); refreshProblems(); };
+    d.querySelector('[data-f=sx]').oninput=e=>{ p.spawn.x=Number(e.target.value); refreshProblems(); };
+    d.querySelector('[data-f=sy]').oninput=e=>{ p.spawn.y=Number(e.target.value); refreshProblems(); };
+    d.querySelector('[data-f=use]').onclick=()=>{ if(AREAS[p.to]) p.spawn={x:AREAS[p.to].spawn.x,y:AREAS[p.to].spawn.y}; panel(); refreshProblems(); };
+  }
+  const li=at(s.locks,x,y);
+  if(li>=0){
+    const l=s.locks[li], d=add('<label>Opens when this flag is set</label><input data-f="flag" list="flags"><datalist id="flags"></datalist>');
+    d.querySelector('#flags').innerHTML=knownFlags().map(f=>'<option value="'+f+'">').join('');
+    const inp=d.querySelector('[data-f=flag]'); inp.value=l.flag; inp.oninput=()=>{ l.flag=inp.value.trim(); refreshProblems(); };
+  }
+  const ti=at(s.triggers,x,y);
+  if(ti>=0){
+    const t=s.triggers[ti], d=add('<label>GO tile runs scene</label><select data-f="scene"></select><button class="no" data-f="rm">REMOVE GO TILE</button>');
+    const sc=d.querySelector('select'); sc.innerHTML=Object.keys(SCENES).map(n=>'<option>'+n+'</option>').join(''); sc.value=t.scene; sc.onchange=()=>{ t.scene=sc.value; refreshProblems(); };
+    d.querySelector('[data-f=rm]').onclick=()=>{ s.triggers.splice(ti,1); refresh(); };
+  }
+  const mi=at(s.monsters,x,y);
+  if(mi>=0){
+    const m=s.monsters[mi], d=add('<label>Fight '+m.id+' kind</label><select data-f="kind"></select><button class="no" data-f="rm">REMOVE FIGHT</button>');
+    const k=d.querySelector('select'); k.innerHTML=Object.keys(ENEMY_TYPES).map(n=>'<option>'+n+'</option>').join(''); k.value=m.kind; k.onchange=()=>{ m.kind=k.value; refreshProblems(); draw(); };
+    d.querySelector('[data-f=rm]').onclick=()=>{ s.monsters.splice(mi,1); refresh(); };
+  }
+  if(s.spawn.x===x&&s.spawn.y===y) add('<span class="muted">The hero starts here.</span>');
+}
+function refreshProblems(){ const p=problems(); $('problems').innerHTML=''; if(!p.length){ $('problems').innerHTML='<span class="ok">No problems.</span>'; return; } p.forEach(t=>{ const d=document.createElement('div'); d.textContent=t; $('problems').appendChild(d); }); }
+
+// ---------- save ----------
+function cleanSpec(){
+  const s=st.spec, o={id:s.id,name:s.name,indoor:!!s.indoor,mask:s.mask,spawn:s.spawn,portals:s.portals||[],locks:s.locks||[],triggers:s.triggers||[],monsters:s.monsters||[]};
+  if(s.art) o.art=s.art; return o;
+}
+async function save(){
+  if(busy||!st.spec||!needGh()) return;
+  const p=problems(); if(p.length){ say('Not saved. '+p[0]+(p.length>1?' (and '+(p.length-1)+' more)':''),true); return; }
+  busy=true; say('Saving to the game repo...');
+  try{
+    const out=cleanSpec(), id=out.id;
+    await ghPut('data/areas/'+id+'.json',toB64(JSON.stringify(out,null,1)+'\n'),'Area editor: '+id);
+    const idx=await readJson('data/areas/index.json',{tag:'0',areas:[]}); idx.areas=idx.areas||[];
+    if(!idx.areas.includes(id)) idx.areas.push(id);
+    idx.tag=Date.now().toString(36);
+    await ghPut('data/areas/index.json',toB64(JSON.stringify(idx,null,1)+'\n'),'Area editor: list '+id);
+    AREAS[id]=areaFromData(out); st.installed.add(id); ART_TAG=idx.tag;
+    st.orig=JSON.stringify(st.spec); fillPicker(id);
+    say('Saved '+id+'. Reload the game to walk it.');
+  }catch(e){ say(e.message,true); }
+  finally{ busy=false; }
+}
+function create(){
+  const id=$('nid').value.trim().toLowerCase(), name=$('nname').value.trim()||id.toUpperCase(), w=Math.round(Number($('nw').value)), h=Math.round(Number($('nh').value));
+  if(!/^[a-z0-9-]+$/.test(id)||id==='index'){ say('The id uses a-z, 0-9 and dashes only, and cannot be "index".',true); return; }
+  if(AREAS[id]){ say('There is already an area with the id '+id+'.',true); return; }
+  if(!(w>=5&&w<=80&&h>=5&&h<=80)){ say('Width and height must be 5 to 80 tiles.',true); return; }
+  const mask=[]; for(let y=0;y<h;y++) mask.push(y===0||y===h-1?'#'.repeat(w):'#'+'.'.repeat(w-2)+'#');
+  const spec={id,name,indoor:$('nindoor').checked,mask,spawn:{x:Math.floor(w/2),y:Math.floor(h/2)},portals:[],locks:[],triggers:[],monsters:[]};
+  AREAS[id]=areaFromData(spec); fillPicker(id); open(id); say('New area '+id+' made. It is saved when you tap SAVE TO GAME.');
+}
+
+for(const b of document.querySelectorAll('#tools button')) b.onclick=()=>{ st.tool=b.dataset.tool; document.querySelectorAll('#tools button').forEach(x=>x.classList.toggle('on',x===b)); };
+$('area').onchange=e=>open(e.target.value);
+$('zoom').oninput=resize;
+$('scrollmode').onclick=()=>{ st.scroll=!st.scroll; $('cv').classList.toggle('scroll',st.scroll); $('scrollmode').textContent='SCROLL MODE: '+(st.scroll?'ON':'OFF'); $('scrollmode').classList.toggle('on',st.scroll); };
+$('save').onclick=save; $('testgh').onclick=testGh; $('mk').onclick=create;
+$('revert').onclick=()=>{ if(st.spec){ st.spec=JSON.parse(st.orig); st.sel=null; resize(); refresh(); say('All changes undone.'); } };
+loadAll();
+window.__AREAS={st,open,applyTool,problems,save,setTile};
+</script>
+</body>
+</html>

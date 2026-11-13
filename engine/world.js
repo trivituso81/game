@@ -1,5 +1,5 @@
 'use strict';
-// engine/world.js: Build 1d.1 placeholder world plus installed areas (engine/areas-data.js, written by tools/install_area.py). Three grey areas, each with a walk mask, portals and (field only) grey fights. No names, no art.
+// engine/world.js: Build 1d.2 placeholder world plus installed areas (data/areas/*.json, listed in data/areas/index.json and fetched at boot by main.js). Three grey areas, each with a walk mask, portals and (field only) grey fights. No names, no art.
 // Walk mask legend: '#' blocked, '.' walkable, 'D' door (walk onto it to go in), 'M' mat (walk onto it to go out),
 // 'E' edge (walk onto it to go on to the next area), 'L' locked door (a door that is a wall until its flag is set).
 // Doors, mats, edges and locked doors are portals; each portal says where it leads. Triggers (not drawn in the mask) start a scene.
@@ -74,7 +74,7 @@ const AREAS={
   })
 };
 
-// Areas written by tools/install_area.py. Each has an explicit mask (rows of the legend above) and a picture path (area.art).
+// Areas written by tools/install_area.py or the Area editor (areas.html). Each has an explicit mask (rows of the legend above) and a picture path (area.art).
 function areaFromData(d) {
   const g=d.mask.map(r=>[...r]);
   const portals=new Map(), triggers=new Map(), locks=new Map();
@@ -84,7 +84,23 @@ function areaFromData(d) {
   const monsters=(d.monsters||[]).map(m=>({id:m.id,kind:m.kind,x:m.x,y:m.y,alive:true}));
   return {id:d.id,name:d.name,w:g[0].length,h:g.length,grid:g,portals,monsters,triggers,locks,spawn:d.spawn,indoor:!!d.indoor,art:d.art||null};
 }
-for(const d of INSTALLED_AREAS) AREAS[d.id]=areaFromData(d);
+// Cache tag for pictures and area files; main.js sets it from data/areas/index.json at boot.
+let ART_TAG='0';
+// Puts installed areas into AREAS. An installed area with the same id as a built-in grey one replaces it.
+function installAreas(list,tag) {
+  if(tag) ART_TAG=String(tag);
+  for(const d of list) AREAS[d.id]=areaFromData(d);
+}
+// Spec (the json shape of data/areas/<id>.json) of any area, built-in or installed. The Area editor uses it to open a built-in grey area.
+function areaToSpec(a) {
+  const spec={id:a.id,name:a.name,indoor:!!a.indoor,mask:a.grid.map(r=>r.join('')),spawn:{x:a.spawn.x,y:a.spawn.y}};
+  spec.portals=[...a.portals].map(([k,p])=>{ const [x,y]=k.split(',').map(Number); return {x,y,to:p.to,spawn:{x:p.spawn.x,y:p.spawn.y}}; });
+  spec.locks=[...a.locks].map(([k,flag])=>{ const [x,y]=k.split(',').map(Number); return {x,y,flag}; });
+  spec.triggers=[...a.triggers].map(([k,scene])=>{ const [x,y]=k.split(',').map(Number); return {x,y,scene}; });
+  spec.monsters=a.monsters.map(m=>({id:m.id,kind:m.kind,x:m.x,y:m.y}));
+  if(a.art) spec.art=a.art;
+  return spec;
+}
 
 function inside(area,x,y) { return x>=0&&y>=0&&x<area.w&&y<area.h; }
 function lockOpen(area,x,y) { const f=area.locks.get(x+','+y); return !!(f&&STORY.flags[f]); }

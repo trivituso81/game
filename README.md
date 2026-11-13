@@ -1,6 +1,6 @@
 # Game (trivituso81/game)
 
-A new JRPG on a fresh engine. Currently at Build 1d.1 (adds the Art Library page, bakers and area installer; the game itself is as in 1c). Build 1c: placeholder world, grey fights and a story engine with one placeholder chapter. No story, cast or art yet.
+A new JRPG on a fresh engine. Currently at Build 1d.2 (adds the Head Sizes, Portraits and Area editor pages; areas are now read from `data/areas/` at boot). Build 1c: placeholder world, grey fights and a story engine with one placeholder chapter. No story, cast or art yet.
 
 ## Run it
 
@@ -30,7 +30,9 @@ Leave `CHROMIUM` unset to use Playwright's own Chromium. Screenshots go to `/tmp
 | `engine/main.js` | Layout, input, walking, transitions, frame loop, debug handle |
 | `art.html`, `data/art-*.json` | Art Library page and its prompt, in-game and note lists |
 | `tools/sprite-bake/` | Generic character and enemy bakers, `heights.json` |
-| `tools/install_area.py`, `data/areas/`, `engine/areas-data.js` | Area installer, its data and generated list |
+| `heads.html`, `portraits.html`, `areas.html`, `admin-lib.js` | Head Sizes, Portraits and Area editor pages; shared GitHub helpers |
+| `engine/areacheck.js` | Area check in JavaScript (same rules as the installer) |
+| `tools/install_area.py`, `data/areas/` | Area installer; area files and `index.json` (the list the game reads at boot) |
 | `tools/smoke.py` | Headless test of the game |
 | `tools/test_tools.py` | Headless test of the Art Library, bakers and installer |
 | `docs/CHANGES.md` | One entry per push |

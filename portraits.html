@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161d1b">
+<title>Portraits</title>
+<link rel="icon" href="data:,">
+<script src="admin-lib.js"></script>
+<style id="css"></style>
+<style>
+canvas{display:block;border-radius:8px;background:repeating-conic-gradient(#2a2e2c 0 25%,#1c2220 0 50%) 0 0/16px 16px;touch-action:none}
+#crop{width:min(100%,420px,68vh);aspect-ratio:1}
+#out{width:128px;height:128px}
+.item{padding:9px;border-radius:8px;background:#12181a;margin-bottom:6px;border:1px solid transparent}
+.item.sel{border-color:#6fb99d}.item small{color:#9fb0a8;display:block}
+.tag{font-size:11px;background:#2f7a4f;border-radius:5px;padding:1px 6px;margin-left:6px}
+input[type=range]{padding:0}
+</style>
+</head>
+<body>
+<script>document.getElementById('css').textContent=ADMIN_CSS; document.body.insertAdjacentHTML('afterbegin','<h1>Portraits</h1>'+ADMIN_NAV+'<div id="status" role="status">Ready.</div>');</script>
+
+<h2>1. Pick an approved picture</h2>
+<div id="list"></div>
+
+<div id="work" hidden>
+<h2>2. Crop a square</h2>
+<div class="box">
+  <canvas id="crop" width="420" height="420" aria-label="Crop area"></canvas>
+  <p class="muted">Drag on the picture to move the square. What is inside the square is the portrait.</p>
+  <label for="zoom">Zoom</label>
+  <input id="zoom" type="range" min="1" max="6" step="0.05" value="1">
+  <label for="pname">Portrait name</label>
+  <input id="pname">
+  <p class="muted">Result (256 x 256):</p>
+  <canvas id="out" width="256" height="256" aria-label="Portrait preview"></canvas>
+  <div class="row"><button id="save" class="go">SAVE PORTRAIT</button><button id="remove" class="no">REMOVE SAVED</button><button id="testgh" class="alt">TEST GITHUB</button></div>
+</div>
+</div>
+
+<h2>Saved portraits</h2>
+<div id="saved"></div>
+
+<script>
+'use strict';
+// Portraits (Build 1d.2). Crop a square portrait out of an approved picture. Saves art/portraits/<name>.png (256 x 256) and lists it in data/portraits.json.
+const OUT=256;
+const st={ingame:{installed:{}},list:{portraits:{}},sel:null,img:null,cx:.5,cy:.5,zoom:1,drag:null};
+let busy=false;
+
+async function load(){
+  let i=null,p=null;
+  if(LS.get('gh-token')&&LS.get('repo')){ try{ i=await readJson('data/art-ingame.json',null); p=await readJson('data/portraits.json',null); }catch(e){ say(e.message,true); } }
+  if(!i) i=await siteJson('data/art-ingame.json'); if(!p) p=await siteJson('data/portraits.json');
+  st.ingame=i||{installed:{}}; st.list=p||{portraits:{}}; st.list.portraits=st.list.portraits||{};
+  drawList(); drawSaved();
+  const n=Object.keys(st.ingame.installed||{}).length;
+  say(n?'Pick a picture.':'No approved pictures yet. Approve one in the Art Library first.');
+}
+function drawList(){
+  const box=$('list'); box.innerHTML='';
+  for(const [id,info] of Object.entries(st.ingame.installed||{})){
+    const d=document.createElement('div'); d.className='item'+(id===st.sel?' sel':''); d.dataset.id=id;
+    d.innerHTML='<b></b>'+(st.list.portraits[id]?'<span class="tag">HAS PORTRAIT</span>':'')+'<small></small>';
+    d.querySelector('b').textContent=id; d.querySelector('small').textContent=info.path;
+    d.onclick=()=>pick(id); box.appendChild(d);
+  }
+}
+function drawSaved(){
+  const box=$('saved'); box.innerHTML='';
+  const ids=Object.keys(st.list.portraits);
+  if(!ids.length){ box.innerHTML='<div class="box muted">None yet.</div>'; return; }
+  for(const id of ids){ const d=document.createElement('div'); d.className='item'; d.innerHTML='<b></b><small></small>'; d.querySelector('b').textContent=id; d.querySelector('small').textContent=st.list.portraits[id].path+' from '+st.list.portraits[id].source; box.appendChild(d); }
+}
+function pick(id){
+  st.sel=id; const path=st.ingame.installed[id].path, saved=st.list.portraits[id];
+  const im=new Image();
+  im.onload=()=>{ st.img=im; const c=saved&&saved.crop; st.cx=c?c.cx:.5; st.cy=c?c.cy:.5; st.zoom=c?c.zoom:1; $('zoom').value=st.zoom; $('pname').value=id; $('work').hidden=false; drawList(); redraw(); say('Drag and zoom, then SAVE PORTRAIT.'); };
+  im.onerror=()=>say('Could not open '+path+' from the game site.',true);
+  im.src=path+'?t='+Date.now();
+}
+// The square: side is the short edge divided by zoom, centred on (cx,cy) in picture fractions, kept inside the picture.
+function square(){
+  const w=st.img.naturalWidth,h=st.img.naturalHeight, side=Math.min(w,h)/st.zoom;
+  const sx=Math.min(w-side,Math.max(0,st.cx*w-side/2)), sy=Math.min(h-side,Math.max(0,st.cy*h-side/2));
+  return {sx,sy,side};
+}
+function redraw(){
+  if(!st.img) return;
+  const cv=$('crop'), c=cv.getContext('2d'), w=st.img.naturalWidth, h=st.img.naturalHeight, sq=square();
+  c.clearRect(0,0,cv.width,cv.height);
+  // The whole picture is shown fitted in the canvas; the square is drawn on it.
+  const k=Math.min(cv.width/w,cv.height/h), ox=(cv.width-w*k)/2, oy=(cv.height-h*k)/2;
+  c.drawImage(st.img,ox,oy,w*k,h*k);
+  c.fillStyle='rgba(0,0,0,.55)'; c.fillRect(0,0,cv.width,cv.height);
+  c.save(); c.beginPath(); c.rect(ox+sq.sx*k,oy+sq.sy*k,sq.side*k,sq.side*k); c.clip(); c.drawImage(st.img,ox,oy,w*k,h*k); c.restore();
+  c.strokeStyle='#6fb99d'; c.lineWidth=2; c.strokeRect(ox+sq.sx*k,oy+sq.sy*k,sq.side*k,sq.side*k);
+  st.k=k; st.ox=ox; st.oy=oy;
+  const o=$('out').getContext('2d'); o.clearRect(0,0,OUT,OUT); o.imageSmoothingQuality='high'; o.drawImage(st.img,sq.sx,sq.sy,sq.side,sq.side,0,0,OUT,OUT);
+}
+const cv=$('crop');
+cv.addEventListener('pointerdown',e=>{ cv.setPointerCapture(e.pointerId); st.drag={x:e.clientX,y:e.clientY,cx:st.cx,cy:st.cy}; });
+cv.addEventListener('pointermove',e=>{
+  if(!st.drag||!st.img) return;
+  const r=cv.getBoundingClientRect(), s=cv.width/r.width, w=st.img.naturalWidth, h=st.img.naturalHeight;
+  st.cx=Math.min(1,Math.max(0,st.drag.cx+(e.clientX-st.drag.x)*s/st.k/w)); st.cy=Math.min(1,Math.max(0,st.drag.cy+(e.clientY-st.drag.y)*s/st.k/h)); redraw();
+});
+cv.addEventListener('pointerup',()=>{ st.drag=null; });
+$('zoom').oninput=e=>{ st.zoom=Number(e.target.value); redraw(); };
+
+function toBlob(){ return new Promise(res=>$('out').toBlob(res,'image/png')); }
+async function save(){
+  if(busy||!st.img||!needGh()) return;
+  const name=$('pname').value.trim().toLowerCase(); if(!/^[a-z0-9-]+$/.test(name)){ say('Use letters, numbers and dashes for the name.',true); return; }
+  busy=true; say('Saving the portrait to the game repo...');
+  try{
+    const path='art/portraits/'+name+'.png', blob=await toBlob();
+    await ghPut(path,await blobToB64(blob),'Portrait: '+name);
+    const l=await readJson('data/portraits.json',{portraits:{}}); l.portraits=l.portraits||{};
+    const sq=square(); l.portraits[name]={path,source:st.ingame.installed[st.sel].path,crop:{cx:+st.cx.toFixed(4),cy:+st.cy.toFixed(4),zoom:+st.zoom.toFixed(2)},size:OUT};
+    await ghPut('data/portraits.json',toB64(JSON.stringify(l,null,2)+'\n'),'Portrait: list '+name);
+    st.list=l; drawList(); drawSaved(); say('Saved '+path+'.');
+  }catch(e){ say(e.message,true); }
+  finally{ busy=false; }
+}
+async function removeSaved(){
+  if(busy||!needGh()) return;
+  const name=$('pname').value.trim().toLowerCase(), cur=st.list.portraits[name]; if(!cur){ say('No saved portrait called '+name+'.',true); return; }
+  busy=true; say('Removing '+name+'...');
+  try{
+    await ghDelete(cur.path,'Portrait: remove '+name);
+    const l=await readJson('data/portraits.json',{portraits:{}}); delete (l.portraits||{})[name];
+    await ghPut('data/portraits.json',toB64(JSON.stringify(l,null,2)+'\n'),'Portrait: unlist '+name);
+    st.list=l; drawList(); drawSaved(); say('Removed '+name+' and its file.');
+  }catch(e){ say(e.message,true); }
+  finally{ busy=false; }
+}
+$('save').onclick=save; $('remove').onclick=removeSaved; $('testgh').onclick=testGh;
+load();
+window.__PORTRAITS={st,pick,save};
+</script>
+</body>
+</html>
