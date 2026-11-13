@@ -51,8 +51,8 @@ const SCENE_OPS={
   },
   face:instant(st=>{ const a=sceneActor(st.who); if(a) a.face=st.dir; }),
   say:{
-    start:(st,sc)=>{ sc.say={who:st.who,text:st.text}; sc.advance=false; return {}; },
-    update:(st,x)=>{ const sc=game.scene; if(sc.advance) { sc.advance=false; sc.say=null; return true; } return false; }
+    start:(st,sc)=>{ sc.say={who:st.who,text:st.text}; sc.advance=false; playVoice(st.who,st.text,true); return {}; },
+    update:(st,x)=>{ const sc=game.scene; if(sc.advance) { sc.advance=false; sc.say=null; stopVoice(); return true; } return false; }
   },
   camera:{
     start:(st)=>{ game.camFocus=st.on==='hero'?null:st.on; return {t:0}; },

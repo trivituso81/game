@@ -46,10 +46,38 @@ button.alt{background:#2e3b37}button.go{background:#2f7a4f}button.no{background:
 #status{position:sticky;top:0;background:#0e1311;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;min-height:36px;z-index:2}
 #status.err{color:#ffb4a8}.muted{color:#9fb0a8;font-size:12px}
 .nav{font-size:12px;margin:0 0 8px}.nav a{color:#9fd6bf;margin-right:10px}`;
-const ADMIN_NAV='<div class="nav"><a href="art.html">Art Library</a><a href="heads.html">Head Sizes</a><a href="portraits.html">Portraits</a><a href="areas.html">Areas</a><a href="index.html">Game</a></div>';
+const ADMIN_NAV='<div class="nav"><a href="art.html">Art Library</a><a href="heads.html">Head Sizes</a><a href="portraits.html">Portraits</a><a href="areas.html">Areas</a><a href="voices.html">Voices</a><a href="music.html">Music</a><a href="index.html">Game</a></div>';
 async function ghDelete(path,message){
   const cur=await ghGet(path); if(!cur) return false;
   const r=await fetch(repoUrl(path),{method:'DELETE',headers:ghHeaders(),body:JSON.stringify({message,sha:cur.sha,branch:'main'})});
   if(!r.ok){ const t=await r.text(); throw new Error('GitHub said '+r.status+' deleting '+path+': '+t.slice(0,160)); }
   return true;
 }
+// One commit for several changes (files added, replaced and deleted together), through GitHub's Git Data API.
+// changes: [{path, b64}] to write, [{path, del:true}] to delete. Used where a replaced file must be purged in the same commit.
+async function ghApi(path,method,body){
+  const r=await fetch('https://api.github.com/repos/'+LS.get('repo')+path,{method:method||'GET',headers:ghHeaders(),body:body?JSON.stringify(body):undefined});
+  if(!r.ok){ const t=await r.text(); throw new Error('GitHub said '+r.status+' on '+path.split('?')[0]+': '+t.slice(0,160)); }
+  return r.json();
+}
+async function ghCommit(changes,message){
+  if(!changes.length) return null;
+  const ref=await ghApi('/git/ref/heads/main'), base=ref.object.sha;
+  const commit=await ghApi('/git/commits/'+base);
+  const tree=[];
+  for(const c of changes){
+    if(c.del) tree.push({path:c.path,mode:'100644',type:'blob',sha:null});
+    else { const b=await ghApi('/git/blobs','POST',{content:c.b64,encoding:'base64'}); tree.push({path:c.path,mode:'100644',type:'blob',sha:b.sha}); }
+  }
+  const t=await ghApi('/git/trees','POST',{base_tree:commit.tree.sha,tree});
+  const n=await ghApi('/git/commits','POST',{message,tree:t.sha,parents:[base]});
+  await ghApi('/git/refs/heads/main','PATCH',{sha:n.sha});
+  return n.sha;
+}
+// Lists the file names in a repo folder ([] if the folder does not exist).
+async function ghList(dir){
+  const cur=await ghGet(dir);
+  return Array.isArray(cur)?cur.map(x=>x.name):[];
+}
+// ElevenLabs address; ?el=<base url> points the pages at a test stub.
+const EL_BASE=()=>(new URLSearchParams(location.search).get('el')||'https://api.elevenlabs.io').replace(/\/+$/,'');

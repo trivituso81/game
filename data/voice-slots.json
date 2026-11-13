@@ -1,0 +1,10 @@
+{
+  "note": "Slot plan for ElevenLabs voices. The account is shared with the first game and capped at 30 custom voices (premade library voices do not count). budget is how many custom voices THIS game may use; Claude raises it after the cast round. A speaker is the 'who' of a scene line, plus 'battle' for fight lines.",
+  "cap": 30,
+  "budget": 2,
+  "speakers": {
+    "hero": {"name": "", "voiceId": "", "kind": ""},
+    "guide": {"name": "", "voiceId": "", "kind": ""},
+    "battle": {"name": "", "voiceId": "", "kind": ""}
+  }
+}

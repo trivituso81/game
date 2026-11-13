@@ -292,8 +292,38 @@ def fake_github(repo, calls):
     """Stubbed GitHub contents API. repo: path -> {'content': b64, 'sha': str}. Supports GET (file or directory listing), PUT and DELETE."""
     from urllib.parse import unquote
 
+    pend = {'blobs': {}, 'tree': None}
+
+    def git_route(route, req):
+        sub = req.url.split('/git/')[-1].split('?')[0]
+        ok = lambda body: route.fulfill(status=200, content_type='application/json', body=json.dumps(body))
+        if req.method == 'GET' and sub.startswith('ref/'):
+            return ok({'object': {'sha': 'c0'}})
+        if req.method == 'GET' and sub.startswith('commits/'):
+            return ok({'tree': {'sha': 't0'}})
+        b = json.loads(req.post_data or '{}')
+        if sub == 'blobs':
+            sha = 'b%d' % len(pend['blobs']); pend['blobs'][sha] = b['content']; return ok({'sha': sha})
+        if sub == 'trees':
+            pend['tree'] = b['tree']; return ok({'sha': 't1'})
+        if sub == 'commits':
+            written, deleted = [], []
+            for e in pend['tree']:
+                if e['sha'] is None:
+                    if e['path'] in repo: del repo[e['path']]
+                    calls['deletes'].append(e['path']); deleted.append(e['path'])
+                else:
+                    repo[e['path']] = {'content': pend['blobs'][e['sha']], 'sha': 'g%d' % len(calls.setdefault('commits', []))}; written.append(e['path'])
+            calls.setdefault('commits', []).append({'message': b['message'], 'written': written, 'deleted': deleted})
+            return ok({'sha': 'c1'})
+        if req.method == 'PATCH':
+            return ok({})
+        route.fulfill(status=404, content_type='application/json', body='{}')
+
     def handler(route):
         req = route.request
+        if '/git/' in req.url:
+            return git_route(route, req)
         if '/contents/' not in req.url:
             route.fulfill(status=200, content_type='application/json', body=json.dumps({'permissions': {'push': True}})); return
         path = unquote(req.url.split('/contents/')[-1].split('?')[0])
@@ -318,6 +348,22 @@ def fake_github(repo, calls):
     return handler
 
 
+EL_MP3 = b''
+
+
+def fake_elevenlabs(calls):
+    """Stubbed ElevenLabs: voice list, text to speech and music return a small real mp3."""
+    def handler(route):
+        req = route.request
+        el = calls.setdefault('el', [])
+        if req.url.split('?')[0].endswith('/v1/voices'):
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({'voices': [
+                {'voice_id': 'v1', 'name': 'Calm', 'category': 'premade'}, {'voice_id': 'v2', 'name': 'Mine', 'category': 'cloned'}]})); return
+        el.append({'url': req.url, 'key': req.headers.get('xi-api-key'), 'body': json.loads(req.post_data or '{}')})
+        route.fulfill(status=200, content_type='audio/mpeg', body=EL_MP3)
+    return handler
+
+
 def seed(repo, tmp, *paths):
     for p in paths:
         repo[p] = {'content': base64.b64encode(open(f'{tmp}/{p}', 'rb').read()).decode(), 'sha': 's0'}
@@ -332,6 +378,7 @@ def admin_page(browser, size, repo, calls, url):
     ctx.add_init_script("() => {}")
     ctx.add_init_script("try{localStorage.setItem('ffiv-gh-token','ghp-test');localStorage.setItem('ffiv-repo','trivituso81/game');}catch(e){}")
     ctx.route('https://api.github.com/**', fake_github(repo, calls))
+    ctx.route('https://api.elevenlabs.io/**', fake_elevenlabs(calls))
     page = ctx.new_page()
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
@@ -586,11 +633,203 @@ def areas_part(tmp, browser):
         os.remove(f'{tmp}/data/areas/{f}')
 
 
+
+def audio_part(tmp, browser):
+    """Build 1e in the game: the title loads no audio file; a scene line plays its file, a line with no file falls back to speech, a fight line plays
+    its file, music starts for the area and stops when it has no track, and the SOUND button mutes. Per orientation, with frames."""
+    page0 = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
+    reqs0 = []
+    page0.on('request', lambda r: reqs0.append(r.url) if '/audio/' in r.url else None)
+    page0.goto(f'http://127.0.0.1:{PORT}/index.html')
+    page0.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+    time.sleep(0.4)
+    check('audio: title with no lines loads no audio file', reqs0 == [], reqs0)
+    check('audio: the two lists load (empty)', page0.evaluate('() => [__FFIV.audio.ready, __FFIV.audio.voiceLines, __FFIV.audio.tracks]') == [True, 0, 0])
+    page0.close()
+    l1 = 'This is a placeholder cutscene. Every kind of step runs here.'
+    ids = {}
+    p1 = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
+    p1.goto(f'http://127.0.0.1:{PORT}/index.html'); p1.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+    ids['line'] = p1.evaluate('(t) => voiceId("guide", t)', l1)
+    ids['fight'] = p1.evaluate('(t) => voiceId("battle", t)', 'MONSTER appears.')
+    p1.close()
+    os.makedirs(f'{tmp}/audio/voice', exist_ok=True); os.makedirs(f'{tmp}/audio/music', exist_ok=True)
+    open(f'{tmp}/audio/voice/{ids["line"]}.mp3', 'wb').write(EL_MP3)
+    open(f'{tmp}/audio/voice/{ids["fight"]}.mp3', 'wb').write(EL_MP3)
+    open(f'{tmp}/audio/music/town-theme.mp3', 'wb').write(EL_MP3)
+    json.dump({'tag': 'x1', 'lines': {ids['line']: {'who': 'guide', 'text': l1, 'where': 'scene', 'file': ids['line'] + '.mp3'},
+                                      ids['fight']: {'who': 'battle', 'text': 'MONSTER appears.', 'where': 'battle', 'file': ids['fight'] + '.mp3'}}}, open(f'{tmp}/data/voice-lines.json', 'w'))
+    json.dump({'tag': 'y1', 'tracks': {'town-theme': {'title': 'Town theme', 'file': 'town-theme.mp3', 'len': 1}}, 'use': {'area:town': 'town-theme'}}, open(f'{tmp}/data/music.json', 'w'))
+    for name, size in {'portrait': (390, 844), 'landscape': (844, 390)}.items():
+        ctx = browser.new_context(viewport={'width': size[0], 'height': size[1]})
+        page = ctx.new_page(); errors = []; reqs = []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+        page.on('request', lambda r: reqs.append(r.url) if '/audio/' in r.url else None)
+        page.on('response', lambda r: errors.append('404 ' + r.url) if r.status == 404 else None)
+        page.goto(f'http://127.0.0.1:{PORT}/index.html')
+        page.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+        time.sleep(0.4)
+        check(f'audio {name}: lists with entries still load no audio file at the title', reqs == [], reqs)
+        check(f'audio {name}: the lists are read', page.evaluate('() => [__FFIV.audio.voiceLines, __FFIV.audio.tracks]') == [2, 1], page.evaluate('() => __FFIV.audio'))
+        page.mouse.click(size[0] // 2, size[1] // 2)           # a tap, so the browser allows sound
+        page.evaluate('() => __FFIV.startChapter(1)')
+        page.wait_for_function("() => __FFIV.mode === 'play'", timeout=15000)
+        page.wait_for_function("() => __FFIV.audio.music === 'town-theme'", timeout=5000)
+        time.sleep(0.4)
+        check(f'audio {name}: entering TOWN A starts its track, loaded on demand', any('town-theme.mp3' in u for u in reqs), reqs)
+        check(f'audio {name}: the track is playing', page.evaluate('() => AUDIO.musicEl && !AUDIO.musicEl.paused && AUDIO.musicEl.loop'))
+        page.evaluate("() => startScene('opening')")
+        page.wait_for_function('() => __FFIV.say !== null', timeout=15000)
+        time.sleep(0.5)
+        log = page.evaluate('() => __FFIV.audio.log.filter(r => r.kind === "voice")')
+        check(f'audio {name}: a scene line with a file plays that file', log and log[-1]['via'] == 'file' and log[-1]['id'] == ids['line'] and log[-1]['ok'] is True, log)
+        check(f'audio {name}: the voice file was requested only now', any(ids['line'] + '.mp3' in u for u in reqs), reqs)
+        page.screenshot(path=f'{SHOTS}/audio-{name}-say.png')
+        page.keyboard.press('Enter')
+        page.wait_for_function('() => __FFIV.say !== null && __FFIV.say.startsWith("A grey monster")', timeout=15000)
+        time.sleep(0.3)
+        log = page.evaluate('() => __FFIV.audio.log.filter(r => r.kind === "voice")')
+        check(f'audio {name}: a scene line with no file falls back to speech', log[-1]['via'] == 'speech', log)
+        page.click('#sound')
+        check(f'audio {name}: SOUND button mutes and says so', page.inner_text('#sound') == 'SOUND OFF' and page.evaluate('() => __FFIV.audio.muted && __FFIV.audio.music === null'))
+        n = len(page.evaluate('() => __FFIV.audio.log'))
+        page.evaluate('([t]) => { playVoice("guide", t, true); musicFor("area:town"); }', [l1]); time.sleep(0.3)
+        check(f'audio {name}: nothing new plays while muted', len(page.evaluate('() => __FFIV.audio.log')) == n)
+        page.click('#sound')
+        check(f'audio {name}: unmuting brings the track back', page.evaluate('() => !__FFIV.audio.muted && __FFIV.audio.music === "town-theme"'))
+        page.screenshot(path=f'{SHOTS}/audio-{name}-sound.png')
+        # a fight line with a file plays; the fight music use is unassigned, so the track stops
+        page.evaluate('() => { game.scene = null; game.camSmooth = false; game.camFocus = null; game.sceneFade = 0; game.actors = []; game.mode = "play"; }')
+        page.evaluate('() => startBattle("monster")')
+        page.wait_for_function('() => __FFIV.battle !== null', timeout=5000)
+        time.sleep(0.5)
+        flog = page.evaluate('() => __FFIV.audio.log.filter(r => r.kind === "voice" && r.id === "%s")' % ids['fight'])
+        check(f'audio {name}: a fight line with a file plays it', flog and flog[-1]['via'] == 'file' and flog[-1]['ok'] is True, page.evaluate('() => __FFIV.audio.log'))
+        check(f'audio {name}: a fight line with no file is not read aloud', all(r['via'] == 'file' for r in page.evaluate('() => __FFIV.audio.log.filter(r => r.kind === "voice")')[-1:]) )
+        check(f'audio {name}: the fight has no track assigned, so the area track stops', page.evaluate('() => __FFIV.audio.music') is None)
+        page.screenshot(path=f'{SHOTS}/audio-{name}-fight.png')
+        check(f'audio {name}: no console errors', not [e for e in errors if '/data/areas/' not in e and 'status of 404' not in e], errors)
+        ctx.close()
+    os.remove(f'{tmp}/data/voice-lines.json'); os.remove(f'{tmp}/data/music.json')
+    json.dump({'tag': '0', 'lines': {}}, open(f'{tmp}/data/voice-lines.json', 'w')); json.dump({'tag': '0', 'tracks': {}, 'use': {}}, open(f'{tmp}/data/music.json', 'w'))
+
+
+def b64(b):
+    return base64.b64encode(b).decode()
+
+
+def put_json(repo, path, obj):
+    repo[path] = {'content': b64(json.dumps(obj).encode()), 'sha': 's0'}
+
+
+def voices_part(tmp, browser):
+    for name, size in {'portrait': (390, 844), 'landscape': (844, 390)}.items():
+        repo, calls = {}, {'puts': [], 'deletes': []}
+        ctx, page, errors = admin_page(browser, size, repo, calls, 'voices.html')
+        page.wait_for_selector('#list .item')
+        check(f'voices {name}: every scene line is listed (4 say steps)', page.locator('#list .item').count() == 4, page.locator('#list .item').count())
+        page.fill('#elkey', 'sk-test'); page.click('#save')
+        page.click('#listv')
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Loaded')", timeout=10000)
+        check(f'voices {name}: the account custom-voice count is shown against the cap of 30', '1 custom voices of 30' in page.inner_text('#acct'), page.inner_text('#acct'))
+        sel = lambda who: page.locator(f'#speakers .item[data-who="{who}"] select')
+        sel('guide').select_option('v2'); sel('hero').select_option('v1')
+        page.click('#saveslots')
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Voice plan saved')", timeout=10000)
+        plan = jget(repo, 'data/voice-slots.json')
+        check(f'voices {name}: the voice plan is committed', plan['speakers']['guide']['voiceId'] == 'v2' and plan['speakers']['guide']['kind'] == 'custom' and plan['speakers']['hero']['kind'] == 'premade' and plan['budget'] == 2, plan)
+        sel('battle').select_option('v2'); sel('hero').select_option('v2')
+        n = len(calls['commits'])
+        page.click('#saveslots')
+        check(f'voices {name}: a plan over the custom-voice budget is refused and nothing is written', 'budget' in page.inner_text('#status') and len(calls['commits']) == n, page.inner_text('#status'))
+        sel('battle').select_option(''); sel('hero').select_option('v1')
+        # make a line: the guide's first line. The repo already lists it under an OLD file name, which must be purged in the same commit.
+        lid = page.evaluate('() => __VOICES.harvest().find(r => r.who === "guide").id')
+        put_json(repo, 'data/voice-lines.json', {'tag': 'old', 'lines': {lid: {'who': 'guide', 'text': 'x', 'where': 'scene', 'file': 'old-name.mp3'}}})
+        repo['audio/voice/old-name.mp3'] = {'content': b64(b'old'), 'sha': 's0'}
+        page.locator(f'#list .item[data-id="{lid}"]').click()
+        page.click('#gen')
+        page.wait_for_selector('#takes .take')
+        tts = [c for c in calls['el'] if '/text-to-speech/v2' in c['url']]
+        check(f'voices {name}: Generate calls text to speech with the guide voice, the line and the key', len(tts) == 1 and tts[0]['body']['text'].startswith('This is a placeholder') and tts[0]['key'] == 'sk-test' and 'mp3' in tts[0]['url'], calls['el'])
+        page.screenshot(path=f'{SHOTS}/voices-{name}-1.png')
+        page.click('#takes .take')
+        page.click('#approve')
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Approved')", timeout=10000)
+        last = calls['commits'][-1]
+        check(f'voices {name}: Approve is one commit with the audio file, the list, and the purge of the replaced file', sorted(last['written']) == sorted([f'audio/voice/{lid}.mp3', 'data/voice-lines.json']) and last['deleted'] == ['audio/voice/old-name.mp3'], last)
+        check(f'voices {name}: the committed file is the audio ElevenLabs returned', base64.b64decode(repo[f'audio/voice/{lid}.mp3']['content']) == EL_MP3)
+        lst = jget(repo, 'data/voice-lines.json')
+        check(f'voices {name}: the list names the new file and moves its cache tag', lst['lines'][lid]['file'] == f'{lid}.mp3' and lst['tag'] != 'old' and 'old-name.mp3' not in json.dumps(lst), lst)
+        check(f'voices {name}: the row now says HAS FILE', 'HAS FILE' in page.locator(f'#list .item[data-id="{lid}"]').inner_text())
+        # fight line
+        page.fill('#addtext', 'MONSTER appears.'); page.click('#addline')
+        check(f'voices {name}: a fight line can be added', page.locator('#list .item').count() == 5, page.locator('#list .item').count())
+        # purge: an orphan scene line with a file, and a stray file the list does not name
+        put_json(repo, 'data/voice-lines.json', {'tag': 'p', 'lines': {lid: lst['lines'][lid], 'guide-deadbeef': {'who': 'guide', 'text': 'gone', 'where': 'scene', 'file': 'guide-deadbeef.mp3'}}})
+        repo['audio/voice/guide-deadbeef.mp3'] = {'content': b64(b'o'), 'sha': 's0'}; repo['audio/voice/stray.mp3'] = {'content': b64(b's'), 'sha': 's0'}
+        page.click('#purge')
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Purged')", timeout=10000)
+        last = calls['commits'][-1]
+        check(f'voices {name}: Purge removes the orphan line file and the stray file in one commit', sorted(last['deleted']) == ['audio/voice/guide-deadbeef.mp3', 'audio/voice/stray.mp3'] and f'audio/voice/{lid}.mp3' in repo, last)
+        check(f'voices {name}: Purge keeps the live line and drops the orphan from the list', list(jget(repo, 'data/voice-lines.json')['lines']) == [lid], jget(repo, 'data/voice-lines.json'))
+        page.click('#purge')
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Nothing to purge')", timeout=10000)
+        check(f'voices {name}: a second Purge finds nothing', True)
+        check(f'voices {name}: no console errors', not [e for e in errors if 'status of 404' not in e], errors)
+        page.screenshot(path=f'{SHOTS}/voices-{name}-2.png')
+        ctx.close()
+
+
+def music_part(tmp, browser):
+    for name, size in {'portrait': (390, 844), 'landscape': (844, 390)}.items():
+        repo, calls = {}, {'puts': [], 'deletes': []}
+        ctx, page, errors = admin_page(browser, size, repo, calls, 'music.html')
+        page.wait_for_selector('#uses .item')
+        check(f'music {name}: places to assign include title, fights, boss and the areas', page.locator('#uses .item[data-use="title"]').count() == 1 and page.locator('#uses .item[data-use="area:town"]').count() == 1 and page.locator('#uses .item[data-use="boss"]').count() == 1)
+        page.fill('#elkey', 'sk-test'); page.click('#save')
+        page.fill('#title', 'Town theme'); page.fill('#prompt', 'calm 16-bit town loop'); page.fill('#secs', '20')
+        check(f'music {name}: the credit estimate is shown', '220 to 280' in page.inner_text('#credits'), page.inner_text('#credits'))
+        page.click('#gen')
+        page.wait_for_selector('#takes .take')
+        mus = [c for c in calls['el'] if '/v1/music' in c['url']]
+        check(f'music {name}: Generate sends the prompt, length and instrumental flag', len(mus) == 1 and mus[0]['body']['music_length_ms'] == 20000 and mus[0]['body']['force_instrumental'] is True and mus[0]['body']['prompt'] == 'calm 16-bit town loop', calls['el'])
+        page.click('#takes .take'); page.click('#approve')
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Approved')", timeout=10000)
+        last = calls['commits'][-1]
+        check(f'music {name}: Approve is one commit with the track and the list', sorted(last['written']) == ['audio/music/town-theme.mp3', 'data/music.json'], last)
+        check(f'music {name}: the committed track is the returned audio', base64.b64decode(repo['audio/music/town-theme.mp3']['content']) == EL_MP3)
+        page.locator('#uses .item[data-use="area:town"] select').select_option('town-theme')
+        page.click('#saveuse')
+        page.wait_for_function("() => document.getElementById('status').textContent === 'Saved.'", timeout=10000)
+        check(f'music {name}: the assignment is saved in the list', jget(repo, 'data/music.json')['use'] == {'area:town': 'town-theme'}, jget(repo, 'data/music.json'))
+        open(f'{tmp}/up.mp3', 'wb').write(EL_MP3)
+        page.fill('#title', 'Battle'); page.fill('#prompt', 'driving fight loop')
+        page.set_input_files('#upfile', f'{tmp}/up.mp3')
+        page.wait_for_selector('#takes .take')
+        page.click('#takes .take'); page.click('#approve')
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Approved')", timeout=10000)
+        check(f'music {name}: an uploaded mp3 is approved as a second track and the first assignment survives', sorted(jget(repo, 'data/music.json')['tracks']) == ['battle', 'town-theme'] and jget(repo, 'data/music.json')['use'] == {'area:town': 'town-theme'}, jget(repo, 'data/music.json'))
+        page.screenshot(path=f'{SHOTS}/music-{name}-1.png')
+        page.locator('#list .item[data-id="town-theme"] .del').click()
+        page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Deleted')", timeout=10000)
+        last = calls['commits'][-1]
+        check(f'music {name}: Delete removes the file, the entry and its assignment in one commit', last['deleted'] == ['audio/music/town-theme.mp3'] and 'town-theme' not in jget(repo, 'data/music.json')['tracks'] and jget(repo, 'data/music.json')['use'] == {}, (last, jget(repo, 'data/music.json')))
+        check(f'music {name}: no console errors', not [e for e in errors if 'status of 404' not in e], errors)
+        page.screenshot(path=f'{SHOTS}/music-{name}-2.png')
+        ctx.close()
+    os.remove(f'{tmp}/up.mp3')
+
+
 def main():
     os.makedirs(SHOTS, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix='ffiv-tools-')
     work = tempfile.mkdtemp(prefix='ffiv-work-')
     shutil.copytree(ROOT, tmp, dirs_exist_ok=True, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+    global EL_MP3
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.4', '-b:a', '64k', f'{work}/t.mp3'], check=True)
+    EL_MP3 = open(f'{work}/t.mp3', 'rb').read()
     tools_part(tmp, work)
     installer_part(tmp, work)
     parity_part(tmp)
@@ -605,6 +844,9 @@ def main():
             heads_part(tmp, browser)
             portraits_part(tmp, browser)
             areas_part(tmp, browser)
+            audio_part(tmp, browser)
+            voices_part(tmp, browser)
+            music_part(tmp, browser)
             browser.close()
         # remove purges everything
         r = run([sys.executable, 'tools/install_area.py', '--remove', 'test-room', '--root', tmp], tmp)

@@ -53,7 +53,8 @@ function startBattle(kind,opts) {
     m.specialUsed=false; m.guard=false;
     if(opts.partyHp) m.hp=Math.min(m.maxHp,opts.partyHp);
   });
-  BATTLE={enemy, ref:opts.ref||null, phase:'busy', actor:0, acting:0, cursor:'attack', queue:[], qt:0, then:null, result:null, turn:1};
+  BATTLE={enemy, ref:opts.ref||null, phase:'busy', actor:0, acting:0, cursor:'attack', queue:[], qt:0, n:0, heard:-1, then:null, result:null, turn:1};
+  musicFor(enemy.boss&&AUDIO.music.use.boss?'boss':'battle');
   game.mode='battle';
   game.path=null;
   say(enemy.name+' appears.');
@@ -62,6 +63,7 @@ function startBattle(kind,opts) {
 }
 
 function say(text) { BATTLE.queue.push(text); }
+function nextMsg() { BATTLE.queue.shift(); BATTLE.qt=0; BATTLE.n++; }
 function after(fn) { BATTLE.then=fn; }
 
 function openMenu(i) {
@@ -163,14 +165,16 @@ function endBattle() {
   if(r==='lose') game.party.forEach(m=>{ m.hp=m.maxHp; });
   lastResult=r;
   BATTLE=null;
+  stopVoice();
   game.mode='play';
+  musicFor('area:'+game.area.id);
 }
 
 // The A button (or Enter) and taps on the message box. Menu: confirm. Busy: skip the message. Over: leave the fight.
 function battleConfirm() {
   if(!BATTLE) return;
   if(BATTLE.phase==='menu') chooseCommand(BATTLE.cursor);
-  else if(BATTLE.phase==='busy') { if(BATTLE.queue.length) { BATTLE.queue.shift(); BATTLE.qt=0; } }
+  else if(BATTLE.phase==='busy') { if(BATTLE.queue.length) nextMsg(); }
   else if(BATTLE.phase==='over') endBattle();
 }
 
@@ -185,8 +189,9 @@ function battleDir(d) {
 function battleUpdate(dt) {
   if(!BATTLE) return;
   if(BATTLE.queue.length) {
+    if(BATTLE.heard!==BATTLE.n) { BATTLE.heard=BATTLE.n; playVoice('battle',BATTLE.queue[0],false); }   // a fight line plays only if it has a file
     BATTLE.qt+=dt;
-    if(BATTLE.qt>=MSG_TIME) { BATTLE.queue.shift(); BATTLE.qt=0; }
+    if(BATTLE.qt>=MSG_TIME) nextMsg();
     return;
   }
   if(BATTLE.then) { const f=BATTLE.then; BATTLE.then=null; f(); }

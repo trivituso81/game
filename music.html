@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161d1b">
+<title>Music Library</title>
+<link rel="icon" href="data:,">
+<style id="css"></style>
+</head>
+<body>
+<h1>Music Library</h1>
+<div id="nav"></div>
+<div id="status" role="status">Ready.</div>
+
+<h2>1. Setup</h2>
+<div class="box">
+  <label for="elkey">ElevenLabs key (stays on this phone; shared with the Voice Library)</label>
+  <input id="elkey" type="password" autocomplete="off" placeholder="sk_...">
+  <div class="row"><button id="save">SAVE SETUP</button><button id="testgh" class="alt">TEST GITHUB</button></div>
+  <p class="muted">GitHub token and repo are entered once on the Art Library page.</p>
+</div>
+
+<h2>2. Tracks</h2>
+<div id="list"></div>
+
+<h2>3. Make a track</h2>
+<div class="box">
+  <label for="title">Title (it becomes the track id)</label><input id="title" placeholder="e.g. Town theme">
+  <label for="prompt">Prompt (what the music sounds like)</label><textarea id="prompt" rows="4" placeholder="instrumental, calm 16-bit town theme, loopable"></textarea>
+  <label for="secs">Length in seconds (10 to 120)</label><input id="secs" type="number" value="60" min="10" max="120">
+  <p class="muted" id="credits"></p>
+  <div class="row"><button id="gen" class="go">GENERATE</button><button id="upbtn" class="alt">UPLOAD MY OWN MP3</button></div>
+  <input id="upfile" type="file" accept="audio/*" hidden>
+</div>
+<div id="takes"></div>
+<div class="box" id="decide" hidden>
+  <div class="row"><button id="approve" class="go">APPROVE</button><button id="reject" class="no">REJECT</button></div>
+</div>
+
+<h2>4. Where each track plays</h2>
+<div class="box">
+  <p class="muted">One track plays at a time. A place with no track is silent. Title, fights, boss fights, and each area.</p>
+  <div id="uses"></div>
+  <div class="row"><button id="saveuse" class="go">SAVE WHERE TRACKS PLAY</button></div>
+</div>
+
+<script src="engine/world.js"></script>
+<script src="engine/audio.js"></script>
+<script src="admin-lib.js"></script>
+<script>
+'use strict';
+// Music Library (Build 1e). world.js is loaded only to list the built-in areas; admin-lib.js loads after the engine files.
+document.getElementById('css').textContent=ADMIN_CSS+'.item{padding:9px;border-radius:8px;background:#12181a;margin-bottom:6px;border:1px solid transparent}.item small{color:#9fb0a8;display:block}.tag{font-size:11px;background:#2f7a4f;border-radius:5px;padding:1px 6px;margin-left:6px}.take{background:#12181a;border-radius:8px;padding:8px;margin-bottom:6px;border:2px solid transparent}.take.sel{border-color:#6fb99d}textarea{min-height:80px}';
+document.getElementById('nav').outerHTML=ADMIN_NAV;
+const CREDITS=[11,14];
+const st={music:{tag:'0',tracks:{},use:{}},takes:[],take:null,busy:false,areas:[],draft:{}};
+let tseq=0, audioEl=null;
+const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40);
+const nextTag=()=>Date.now().toString(36);
+
+function loadSetup(){ $('elkey').value=LS.get('el-key')||''; }
+function saveSetup(){ LS.set('el-key',$('elkey').value.trim()); say('Setup saved on this phone.'); }
+function showCredits(){ const s=Math.max(10,Math.min(120,parseInt($('secs').value,10)||60)); $('credits').textContent='Estimated cost: about '+s*CREDITS[0]+' to '+s*CREDITS[1]+' ElevenLabs credits for '+s+' seconds.'; }
+function playBlob(blob){ if(audioEl){ try{audioEl.pause();}catch(e){} } audioEl=new Audio(URL.createObjectURL(blob)); audioEl.play().catch(()=>say('The phone refused to play. Tap again.',true)); }
+function playUrl(u){ if(audioEl){ try{audioEl.pause();}catch(e){} } audioEl=new Audio(u); audioEl.play().catch(()=>say('Could not play the game file.',true)); }
+
+function drawList(){
+  const box=$('list'); box.innerHTML=''; const ids=Object.keys(st.music.tracks);
+  if(!ids.length){ box.innerHTML='<div class="box muted">No tracks yet. Make one in section 3.</div>'; return; }
+  ids.forEach(id=>{
+    const t=st.music.tracks[id], d=document.createElement('div'); d.className='item'; d.dataset.id=id;
+    const where=Object.keys(st.music.use).filter(u=>st.music.use[u]===id);
+    d.innerHTML='<b></b><small></small><small class="w"></small><div class="row"><button class="alt play">PLAY</button><button class="no del">DELETE</button></div>';
+    d.querySelector('b').textContent=t.title||id; d.querySelectorAll('small')[0].textContent=id+'  ('+(t.len||'?')+' s)';
+    d.querySelector('.w').textContent=where.length?'Plays at: '+where.join(', '):'Not assigned anywhere yet';
+    d.querySelector('.play').onclick=()=>{ playUrl('audio/music/'+t.file+'?v='+st.music.tag); say('Playing '+(t.title||id)+' (the file the game plays).'); };
+    d.querySelector('.del').onclick=()=>removeTrack(id);
+    box.appendChild(d);
+  });
+}
+function drawUses(){
+  const box=$('uses'); box.innerHTML='';
+  const uses=['title','battle','boss'].concat(st.areas.map(a=>'area:'+a));
+  uses.forEach(u=>{
+    const d=document.createElement('div'); d.className='item'; d.dataset.use=u;
+    d.innerHTML='<b></b><select></select>'; d.querySelector('b').textContent=u;
+    const sel=d.querySelector('select'), cur=st.music.use[u]||'';
+    [''].concat(Object.keys(st.music.tracks)).forEach(id=>{ const o=document.createElement('option'); o.value=id; o.textContent=id?((st.music.tracks[id].title||id)):'(silent)'; if(id===cur) o.selected=true; sel.appendChild(o); });
+    sel.onchange=()=>{ if(sel.value) st.music.use[u]=sel.value; else delete st.music.use[u]; drawList(); };
+    box.appendChild(d);
+  });
+}
+function drawTakes(){
+  const box=$('takes'); box.innerHTML='';
+  st.takes.forEach(t=>{
+    const d=document.createElement('div'); d.className='take'+(t.key===st.take?' sel':''); d.dataset.key=t.key;
+    d.textContent=(t.source==='upload'?'Uploaded ':'Generated ')+t.id+' at '+new Date(t.ts).toLocaleTimeString()+' ('+Math.round(t.blob.size/1024)+' KB). Tap to select and hear it.';
+    d.onclick=()=>{ st.take=t.key; drawTakes(); playBlob(t.blob); };
+    box.appendChild(d);
+  });
+  $('decide').hidden=!st.takes.length;
+}
+function curTake(){ return st.takes.find(t=>t.key===st.take)||null; }
+function addTake(blob,source,id,title,prompt,len){ const t={key:++tseq,ts:Date.now(),blob,source,id,title,prompt,len}; st.takes.unshift(t); st.takes=st.takes.slice(0,5); st.take=t.key; drawTakes(); playBlob(blob); }
+
+async function generate(){
+  if(st.busy) return;
+  const key=LS.get('el-key'); if(!key){ say('Enter your ElevenLabs key in Setup first.',true); return; }
+  const title=$('title').value.trim(), prompt=$('prompt').value.trim(), id=slug(title);
+  if(!id){ say('Type a title first.',true); return; } if(!prompt){ say('Type a prompt first.',true); return; }
+  const len=Math.max(10,Math.min(120,parseInt($('secs').value,10)||60));
+  st.busy=true; $('gen').disabled=true; say('Generating... (this can take a minute)');
+  try{
+    const r=await fetch(EL_BASE()+'/v1/music?output_format=mp3_44100_128',{method:'POST',headers:{'xi-api-key':key,'Content-Type':'application/json',Accept:'audio/mpeg'},body:JSON.stringify({prompt,music_length_ms:len*1000,model_id:'music_v1',force_instrumental:true})});
+    if(!r.ok){ const t=await r.text(); throw new Error('ElevenLabs said '+r.status+': '+t.slice(0,160)); }
+    const blob=new Blob([await r.arrayBuffer()],{type:'audio/mpeg'}); if(!blob.size) throw new Error('No audio came back.');
+    addTake(blob,'elevenlabs',id,title,prompt,len); say('Done. Tap the take to hear it, then APPROVE or REJECT.');
+  }catch(e){ say((e instanceof TypeError?'The browser blocked the request. ':'')+e.message,true); }
+  finally{ st.busy=false; $('gen').disabled=false; }
+}
+function upload(f){
+  if(!f) return; const title=$('title').value.trim(), id=slug(title);
+  if(!id){ say('Type a title first, then upload.',true); return; }
+  addTake(f,'upload',id,title,$('prompt').value.trim(),parseInt($('secs').value,10)||0); say('Uploaded. Tap it, then APPROVE or REJECT.');
+}
+async function approve(){
+  if(st.busy||!needGh()) return; const t=curTake(); if(!t){ say('Tap a take first.',true); return; }
+  st.busy=true; say('Approving: saving the track and the list in one commit...');
+  try{
+    const file=t.id+'.mp3', changes=[{path:'audio/music/'+file,b64:await blobToB64(t.blob)}];
+    const m=await readJson('data/music.json',{tag:'0',tracks:{},use:{}}); m.tracks=m.tracks||{}; m.use=m.use||{};
+    const old=m.tracks[t.id]; if(old&&old.file&&old.file!==file) changes.push({path:'audio/music/'+old.file,del:true});
+    m.tracks[t.id]={title:t.title,file,prompt:t.prompt,len:t.len,date:new Date().toISOString().slice(0,10)}; m.tag=nextTag();
+    changes.push({path:'data/music.json',b64:toB64(JSON.stringify(m,null,2)+'\n')});
+    await ghCommit(changes,'Music: approve '+t.id);
+    st.music=m; st.takes=[]; st.take=null; drawList(); drawUses(); drawTakes();
+    say('Approved. audio/music/'+file+' is in the game repo. Assign it below to make it play.');
+  }catch(e){ say(e.message,true); }
+  finally{ st.busy=false; }
+}
+function reject(){ const t=curTake(); if(!t) return; st.takes=st.takes.filter(x=>x.key!==t.key); st.take=st.takes.length?st.takes[0].key:null; drawTakes(); say('Take thrown away.'); }
+async function saveUse(){
+  if(st.busy||!needGh()) return; st.busy=true; say('Saving where tracks play...');
+  try{
+    const m=await readJson('data/music.json',{tag:'0',tracks:{},use:{}}); m.use=st.music.use; m.tag=nextTag();
+    await ghCommit([{path:'data/music.json',b64:toB64(JSON.stringify(m,null,2)+'\n')}],'Music: where tracks play');
+    st.music=m; drawList(); say('Saved.');
+  }catch(e){ say(e.message,true); } finally{ st.busy=false; }
+}
+async function removeTrack(id){
+  if(st.busy||!needGh()) return; st.busy=true; say('Deleting '+id+' (file, list entry and assignments, one commit)...');
+  try{
+    const m=await readJson('data/music.json',{tag:'0',tracks:{},use:{}}); const t=(m.tracks||{})[id]; if(!t){ say('That track is not in the repo list.',true); return; }
+    const changes=[{path:'audio/music/'+t.file,del:true}]; delete m.tracks[id];
+    Object.keys(m.use||{}).forEach(u=>{ if(m.use[u]===id) delete m.use[u]; }); m.tag=nextTag();
+    changes.push({path:'data/music.json',b64:toB64(JSON.stringify(m,null,2)+'\n')});
+    await ghCommit(changes,'Music: remove '+id);
+    st.music=m; drawList(); drawUses(); say('Deleted '+id+'.');
+  }catch(e){ say(e.message,true); } finally{ st.busy=false; }
+}
+
+async function init(){
+  loadSetup(); showCredits();
+  const m=await siteJson('data/music.json'); if(m) st.music={tag:m.tag||'0',tracks:m.tracks||{},use:m.use||{}};
+  const idx=await siteJson('data/areas/index.json'), ids=new Set(Object.keys(AREAS).filter(k=>true)); (idx&&idx.areas||[]).forEach(a=>ids.add(a));
+  st.areas=[...ids]; drawList(); drawUses();
+}
+$('save').onclick=saveSetup; $('testgh').onclick=testGh; $('gen').onclick=generate; $('secs').oninput=showCredits;
+$('upbtn').onclick=()=>$('upfile').click(); $('upfile').onchange=e=>{ upload(e.target.files[0]); e.target.value=''; };
+$('approve').onclick=approve; $('reject').onclick=reject; $('saveuse').onclick=saveUse;
+init();
+window.__MUSIC={st,generate,approve,saveUse,removeTrack};
+</script>
+</body>
+</html>

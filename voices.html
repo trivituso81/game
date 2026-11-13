@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161d1b">
+<title>Voice Library</title>
+<link rel="icon" href="data:,">
+<style id="css"></style>
+</head>
+<body>
+<h1>Voice Library</h1>
+<div id="nav"></div>
+<div id="status" role="status">Ready.</div>
+
+<h2>1. Setup</h2>
+<div class="box">
+  <label for="elkey">ElevenLabs key (stays on this phone; shared with the Music Library)</label>
+  <input id="elkey" type="password" autocomplete="off" placeholder="sk_...">
+  <label for="elmodel">Voice model</label>
+  <input id="elmodel" value="eleven_multilingual_v2">
+  <div class="row"><button id="save">SAVE SETUP</button><button id="testgh" class="alt">TEST GITHUB</button><button id="listv" class="alt">LOAD MY VOICES</button></div>
+  <p class="muted">GitHub token and repo are entered once on the Art Library page. <span id="acct"></span></p>
+</div>
+
+<h2>2. Who speaks which voice</h2>
+<div class="box">
+  <p class="muted" id="plan"></p>
+  <div id="speakers"></div>
+  <div class="row"><button id="saveslots" class="go">SAVE VOICE PLAN</button></div>
+</div>
+
+<h2>3. Lines</h2>
+<div class="box">
+  <label for="filter">Show</label>
+  <select id="filter"><option value="all">All lines</option><option value="none">No file yet</option><option value="file">Has a file</option></select>
+</div>
+<div id="list"></div>
+<div class="box">
+  <b>Add a fight line</b>
+  <p class="muted">Scene lines appear above on their own. Fight messages are built from names and numbers, so only a fixed fight line (a battle cry) is added here, with the exact words the fight shows.</p>
+  <label for="addtext">Exact text</label><input id="addtext" placeholder="exact words the fight shows">
+  <div class="row"><button id="addline" class="alt">ADD FIGHT LINE</button></div>
+</div>
+
+<h2>4. Make it</h2>
+<div class="box" id="work" hidden>
+  <b id="wwho"></b> <span class="muted" id="wid"></span>
+  <p id="wtext"></p>
+  <div class="row">
+    <button id="playcur" class="alt">PLAY WHAT THE GAME PLAYS</button>
+    <button id="gen" class="go">GENERATE</button>
+  </div>
+</div>
+<div id="takes"></div>
+<div class="box" id="decide" hidden>
+  <div class="row"><button id="approve" class="go">APPROVE</button><button id="reject" class="no">REJECT</button></div>
+</div>
+
+<h2>5. Clean up</h2>
+<div class="box">
+  <p class="muted">Removes voice files whose line no scene plays any more (a changed line is a new line), and any file the list does not name. One commit.</p>
+  <div class="row"><button id="purge" class="alt">PURGE UNUSED FILES</button></div>
+</div>
+
+<script src="engine/audio.js"></script>
+<script src="engine/story.js"></script>
+<script src="admin-lib.js"></script>
+<script>
+'use strict';
+// Voice Library (Build 1e). Loads the engine's audio.js and story.js only to read the scene lines and to compute line ids; admin-lib.js loads after them.
+document.getElementById('css').textContent=ADMIN_CSS+'.item{padding:9px;border-radius:8px;background:#12181a;margin-bottom:6px;border:1px solid transparent}.item.sel{border-color:#6fb99d}.item small{color:#9fb0a8;display:block}.tag{font-size:11px;background:#3a4a45;border-radius:5px;padding:1px 6px;margin-left:6px}.tag.ok{background:#2f7a4f}.tag.warn{background:#8a6a30}.take{background:#12181a;border-radius:8px;padding:8px;margin-bottom:6px;border:2px solid transparent}.take.sel{border-color:#6fb99d}';
+document.getElementById('nav').outerHTML=ADMIN_NAV;
+const MAX_TAKES=5;
+const st={lines:{tag:'0',lines:{}},slots:{cap:30,budget:2,speakers:{}},rows:[],sel:null,takes:[],take:null,busy:false,voices:[]};
+
+// ---------- the lines the game can show ----------
+// Every say step in every scene, plus the fight lines kept in data/voice-lines.json.
+function harvest() {
+  const rows=[], seen=new Set();
+  Object.keys(SCENES).forEach(sid=>SCENES[sid].steps.forEach(s=>{
+    if(s.op!=='say') return;
+    const id=voiceId(s.who,s.text); if(seen.has(id)) return; seen.add(id);
+    rows.push({id,who:s.who,text:s.text,where:'scene '+sid,kind:'scene'});
+  }));
+  Object.keys(st.lines.lines).forEach(id=>{
+    const e=st.lines.lines[id]; if(seen.has(id)||e.where!=='battle') return; seen.add(id);
+    rows.push({id,who:e.who,text:e.text,where:'fight',kind:'battle'});
+  });
+  return rows;
+}
+const entry=id=>st.lines.lines[id]||null;
+const hasFile=id=>{ const e=entry(id); return !!(e&&e.file); };
+
+// ---------- setup ----------
+function loadSetup(){ $('elkey').value=LS.get('el-key')||''; $('elmodel').value=LS.get('el-model')||'eleven_multilingual_v2'; }
+function saveSetup(){ LS.set('el-key',$('elkey').value.trim()); LS.set('el-model',$('elmodel').value.trim()||'eleven_multilingual_v2'); say('Setup saved on this phone.'); }
+async function loadVoices(){
+  const key=LS.get('el-key'); if(!key){ say('Enter your ElevenLabs key in Setup first.',true); return; }
+  try{
+    const r=await fetch(EL_BASE()+'/v1/voices',{headers:{'xi-api-key':key}});
+    if(!r.ok) throw new Error('ElevenLabs said '+r.status);
+    const j=await r.json(); st.voices=(j.voices||[]).map(v=>({id:v.voice_id,name:v.name,kind:v.category==='premade'?'premade':'custom'}));
+    const custom=st.voices.filter(v=>v.kind==='custom').length;
+    $('acct').textContent='Your ElevenLabs account has '+custom+' custom voices of '+st.slots.cap+' allowed (shared with the first game).';
+    drawSpeakers(); say('Loaded '+st.voices.length+' voices.');
+  }catch(e){ say((e instanceof TypeError?'The browser blocked the request. ':'')+e.message,true); }
+}
+
+// ---------- voice plan (data/voice-slots.json) ----------
+function speakersNow(){
+  const names=new Set(Object.keys(st.slots.speakers||{}));
+  st.rows.forEach(r=>names.add(r.who)); names.add('battle');
+  return [...names];
+}
+function customCount(){ return Object.values(st.slots.speakers||{}).filter(s=>s.voiceId&&s.kind==='custom').length; }
+function drawSpeakers(){
+  const box=$('speakers'); box.innerHTML='';
+  speakersNow().forEach(who=>{
+    const sp=st.slots.speakers[who]=st.slots.speakers[who]||{name:'',voiceId:'',kind:''};
+    const d=document.createElement('div'); d.className='item'; d.dataset.who=who;
+    d.innerHTML='<b></b><span class="tag"></span><label>Voice</label><select></select>';
+    d.querySelector('b').textContent=who; d.querySelector('.tag').textContent=sp.voiceId?(sp.kind==='custom'?'custom':'premade'):'no voice';
+    const sel=d.querySelector('select');
+    const opts=[{id:'',name:'(none)',kind:''}].concat(st.voices);
+    if(sp.voiceId&&!opts.find(v=>v.id===sp.voiceId)) opts.push({id:sp.voiceId,name:sp.name||sp.voiceId,kind:sp.kind});
+    opts.forEach(v=>{ const o=document.createElement('option'); o.value=v.id; o.textContent=v.id?(v.name+' ('+v.kind+')'):v.name; if(v.id===sp.voiceId) o.selected=true; sel.appendChild(o); });
+    sel.onchange=()=>{ const v=opts.find(x=>x.id===sel.value); sp.voiceId=v.id; sp.name=v.id?v.name:''; sp.kind=v.kind; drawSpeakers(); };
+    box.appendChild(d);
+  });
+  $('plan').textContent='Custom voices planned for this game: '+customCount()+' of '+st.slots.budget+' (the account cap is '+st.slots.cap+', shared with the first game). Premade voices do not count. Tap LOAD MY VOICES to pick from your account.';
+}
+async function saveSlots(){
+  if(st.busy||!needGh()) return;
+  if(customCount()>st.slots.budget){ say('That plans '+customCount()+' custom voices but this game has a budget of '+st.slots.budget+'. Pick premade voices, or ask Claude to raise the budget.',true); return; }
+  st.busy=true; say('Saving the voice plan...');
+  try{
+    const out={note:st.slots.note,cap:st.slots.cap,budget:st.slots.budget,speakers:st.slots.speakers};
+    await ghCommit([{path:'data/voice-slots.json',b64:toB64(JSON.stringify(out,null,2)+'\n')}],'Voice: voice plan');
+    say('Voice plan saved.');
+  }catch(e){ say(e.message,true); } finally{ st.busy=false; }
+}
+
+// ---------- list ----------
+function drawList(){
+  const box=$('list'), f=$('filter').value; box.innerHTML='';
+  const rows=st.rows.filter(r=>f==='all'||(f==='file')===hasFile(r.id));
+  if(!rows.length){ box.innerHTML='<div class="box muted">No lines to show.</div>'; return; }
+  rows.forEach(r=>{
+    const d=document.createElement('div'); d.className='item'+(r.id===st.sel?' sel':''); d.dataset.id=r.id;
+    d.innerHTML='<b></b><span class="tag"></span><small></small><small class="where"></small>';
+    d.querySelector('b').textContent=r.who; const t=d.querySelector('.tag'); t.textContent=hasFile(r.id)?'HAS FILE':'NO FILE'; if(hasFile(r.id)) t.classList.add('ok');
+    d.querySelectorAll('small')[0].textContent=r.text; d.querySelector('.where').textContent=r.where;
+    d.onclick=()=>pick(r.id); box.appendChild(d);
+  });
+}
+function pick(id){
+  st.sel=id; st.takes=[]; st.take=null; const r=st.rows.find(x=>x.id===id);
+  $('work').hidden=false; $('wwho').textContent=r.who; $('wid').textContent=id; $('wtext').textContent=r.text;
+  drawList(); drawTakes();
+}
+function addLine(){
+  const text=$('addtext').value.trim(); if(!text){ say('Type the exact fight text first.',true); return; }
+  const id=voiceId('battle',text);
+  if(!st.lines.lines[id]) st.lines.lines[id]={who:'battle',text,where:'battle',file:null};
+  st.rows=harvest(); drawList(); drawSpeakers(); pick(id); $('addtext').value='';
+  say('Fight line added. It is saved with the list when you approve a take for it.');
+}
+
+// ---------- takes ----------
+function curTake(){ return st.takes.find(t=>t.key===st.take)||null; }
+let tseq=0, audioEl=null;
+function playBlob(blob){ if(audioEl){ try{audioEl.pause();}catch(e){} } audioEl=new Audio(URL.createObjectURL(blob)); audioEl.play().catch(()=>say('The phone refused to play. Tap PLAY again.',true)); }
+function drawTakes(){
+  const box=$('takes'); box.innerHTML='';
+  st.takes.forEach(t=>{
+    const d=document.createElement('div'); d.className='take'+(t.key===st.take?' sel':''); d.dataset.key=t.key;
+    d.textContent='Take from '+new Date(t.ts).toLocaleTimeString()+' ('+Math.round(t.blob.size/1024)+' KB). Tap to select and hear it.';
+    d.onclick=()=>{ st.take=t.key; drawTakes(); playBlob(t.blob); };
+    box.appendChild(d);
+  });
+  $('decide').hidden=!st.takes.length;
+}
+async function generate(){
+  if(st.busy||!st.sel) return;
+  const key=LS.get('el-key'); if(!key){ say('Enter your ElevenLabs key in Setup first.',true); return; }
+  const r=st.rows.find(x=>x.id===st.sel), sp=st.slots.speakers[r.who];
+  if(!sp||!sp.voiceId){ say('Pick a voice for '+r.who+' in section 2 first.',true); return; }
+  st.busy=true; $('gen').disabled=true; say('Generating... (a few seconds)');
+  try{
+    const resp=await fetch(EL_BASE()+'/v1/text-to-speech/'+encodeURIComponent(sp.voiceId)+'?output_format=mp3_44100_128',{method:'POST',headers:{'xi-api-key':key,'Content-Type':'application/json',Accept:'audio/mpeg'},body:JSON.stringify({text:r.text,model_id:LS.get('el-model')||'eleven_multilingual_v2'})});
+    if(!resp.ok){ const t=await resp.text(); throw new Error('ElevenLabs said '+resp.status+': '+t.slice(0,160)); }
+    const blob=new Blob([await resp.arrayBuffer()],{type:'audio/mpeg'});
+    if(!blob.size) throw new Error('No audio came back.');
+    const take={key:++tseq,ts:Date.now(),blob}; st.takes.unshift(take); st.takes=st.takes.slice(0,MAX_TAKES); st.take=take.key;
+    drawTakes(); playBlob(blob); say('Done. Tap a take to hear it, then APPROVE or REJECT.');
+  }catch(e){ say((e instanceof TypeError?'The browser blocked the request. ':'')+e.message,true); }
+  finally{ st.busy=false; $('gen').disabled=false; }
+}
+function nextTag(){ return Date.now().toString(36); }
+async function approve(){
+  if(st.busy||!needGh()) return; const t=curTake(); if(!t){ say('Tap a take first.',true); return; }
+  const r=st.rows.find(x=>x.id===st.sel);
+  st.busy=true; say('Approving: saving the audio file and the list in one commit...');
+  try{
+    const file=r.id+'.mp3', changes=[{path:'audio/voice/'+file,b64:await blobToB64(t.blob)}];
+    const list=await readJson('data/voice-lines.json',{tag:'0',lines:{}}); list.lines=list.lines||{};
+    const old=list.lines[r.id];
+    if(old&&old.file&&old.file!==file) changes.push({path:'audio/voice/'+old.file,del:true});    // a replaced file is purged in the same commit
+    list.lines[r.id]={who:r.who,text:r.text,where:r.kind==='battle'?'battle':'scene',file,date:new Date().toISOString().slice(0,10)};
+    list.tag=nextTag();
+    changes.push({path:'data/voice-lines.json',b64:toB64(JSON.stringify(list,null,2)+'\n')});
+    await ghCommit(changes,'Voice: approve '+r.id);
+    st.lines=list; st.takes=[]; st.take=null; drawList(); drawTakes();
+    say('Approved. audio/voice/'+file+' is in the game repo and listed.');
+  }catch(e){ say(e.message,true); }
+  finally{ st.busy=false; }
+}
+function reject(){ const t=curTake(); if(!t){ say('Tap a take first.',true); return; } st.takes=st.takes.filter(x=>x.key!==t.key); st.take=st.takes.length?st.takes[0].key:null; drawTakes(); say('Take thrown away.'); }
+async function purge(){
+  if(st.busy||!needGh()) return;
+  st.busy=true; say('Looking for unused voice files...');
+  try{
+    const list=await readJson('data/voice-lines.json',{tag:'0',lines:{}}); list.lines=list.lines||{};
+    const live=new Set(harvest().map(r=>r.id)), keep={}, changes=[], listed=new Set();
+    Object.keys(list.lines).forEach(id=>{
+      const e=list.lines[id], used=live.has(id)||e.where==='battle';
+      if(used) { keep[id]=e; if(e.file) listed.add(e.file); }
+      else if(e.file) changes.push({path:'audio/voice/'+e.file,del:true});
+    });
+    const files=(await ghList('audio/voice')).filter(n=>n.endsWith('.mp3'));
+    files.forEach(n=>{ if(!listed.has(n)&&!changes.find(c=>c.path==='audio/voice/'+n)) changes.push({path:'audio/voice/'+n,del:true}); });
+    if(!changes.length){ say('Nothing to purge. Every voice file belongs to a line the game plays.'); return; }
+    list.lines=keep; list.tag=nextTag();
+    changes.push({path:'data/voice-lines.json',b64:toB64(JSON.stringify(list,null,2)+'\n')});
+    await ghCommit(changes,'Voice: purge unused files');
+    st.lines=list; st.rows=harvest(); drawList();
+    say('Purged '+(changes.length-1)+' unused file(s) in one commit.');
+  }catch(e){ say(e.message,true); }
+  finally{ st.busy=false; }
+}
+async function playCurrent(){
+  if(!st.sel) return; const e=entry(st.sel);
+  if(!e||!e.file){ say('This line has no file yet; the game reads it with speech synthesis.',true); return; }
+  if(audioEl){ try{audioEl.pause();}catch(x){} } audioEl=new Audio('audio/voice/'+e.file+'?v='+st.lines.tag); audioEl.play().catch(()=>say('Could not play the game file.',true));
+}
+
+async function init(){
+  loadSetup();
+  const [l,s]=await Promise.all([siteJson('data/voice-lines.json'),siteJson('data/voice-slots.json')]);
+  if(l) st.lines={tag:l.tag||'0',lines:l.lines||{}};
+  if(s) st.slots=Object.assign({cap:30,budget:2,speakers:{}},s);
+  st.rows=harvest(); drawSpeakers(); drawList();
+}
+$('save').onclick=saveSetup; $('testgh').onclick=testGh; $('listv').onclick=loadVoices; $('saveslots').onclick=saveSlots;
+$('filter').onchange=drawList; $('addline').onclick=addLine; $('gen').onclick=generate; $('playcur').onclick=playCurrent;
+$('approve').onclick=approve; $('reject').onclick=reject; $('purge').onclick=purge;
+init();
+window.__VOICES={st,pick,generate,approve,purge,harvest};
+</script>
+</body>
+</html>

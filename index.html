@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#161d1b">
-<title>Build 1d.2</title>
+<title>Build 1e</title>
 <link rel="icon" href="data:,">
 <style>
 html,body{margin:0;height:100%;background:#161d1b;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;font-family:system-ui,-apple-system,sans-serif;color:#ddd}
@@ -19,6 +19,7 @@ html,body{margin:0;height:100%;background:#161d1b;overflow:hidden;touch-action:n
 #act{width:84px;height:84px;border-radius:50%;border:0;background:rgba(46,59,55,.72);color:#e8efe9;font-size:16px;letter-spacing:.08em;touch-action:none;padding:0}
 #act.pressed{background:#55706a}
 #rotate{position:fixed;top:10px;right:10px;background:#2e3b37;color:#cfd8d4;border:0;border-radius:8px;padding:8px 10px;font-size:12px;letter-spacing:.06em;touch-action:none}
+#sound{position:fixed;top:10px;right:84px;background:#2e3b37;color:#cfd8d4;border:0;border-radius:8px;padding:8px 10px;font-size:12px;letter-spacing:.06em;touch-action:none}
 #toast{position:fixed;left:50%;top:50px;transform:translateX(-50%);background:rgba(20,28,26,.92);color:#eef3ef;padding:8px 14px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
 #toast.on{opacity:1}
 html.portrait #dpad{left:24px;bottom:22px}
@@ -43,14 +44,16 @@ html.landscape #act{right:26px;top:50%;margin-top:-42px}
   </div>
   <button id="act" class="pad" aria-label="A">A</button>
 </div>
+<button id="sound">SOUND ON</button>
 <button id="rotate">ROTATE</button>
 <div id="toast" role="status"></div>
-<script src="engine/world.js?v=1d2"></script>
-<script src="engine/draw.js?v=1d2"></script>
-<script src="engine/battle.js?v=1d2"></script>
-<script src="engine/battle-draw.js?v=1d2"></script>
-<script src="engine/story.js?v=1d2"></script>
-<script src="engine/story-draw.js?v=1d2"></script>
-<script src="engine/main.js?v=1d2"></script>
+<script src="engine/world.js?v=1e"></script>
+<script src="engine/audio.js?v=1e"></script>
+<script src="engine/draw.js?v=1e"></script>
+<script src="engine/battle.js?v=1e"></script>
+<script src="engine/battle-draw.js?v=1e"></script>
+<script src="engine/story.js?v=1e"></script>
+<script src="engine/story-draw.js?v=1e"></script>
+<script src="engine/main.js?v=1e"></script>
 </body>
 </html>

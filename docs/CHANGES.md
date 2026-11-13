@@ -2,6 +2,15 @@
 
 Every push adds an entry here. Newest first.
 
+## 1e (2026-11-12): voice and music as real audio files
+
+- New `engine/audio.js`. Boot reads two small lists, `data/voice-lines.json` and `data/music.json`, and fetches no audio file; the title loads none. A scene `say` step plays `audio/voice/<id>.mp3` when the list has a file for that speaker and text (`voiceId(who,text)` = speaker plus a hash of the exact text, so a changed line is a new line); a scene line with no file is read by speech synthesis. Fight lines play only if they have a file (every fight message is not read aloud). Speaker `battle` is used for fight lines.
+- Music: `data/music.json` holds `tracks` and `use` (title, battle, boss, `area:<id>`). One track plays at a time, loaded when its place is entered, looped. A place with no track is silent. If the browser blocks sound before the first tap, the track starts on the first tap or key. SOUND ON/OFF button at the top (saved as `ffiv-mute`).
+- New `voices.html` (Voice Library): lists every scene line, picks a voice per speaker from the ElevenLabs account (`ffiv-el-key`, stays on the phone), generates a line through the ElevenLabs text-to-speech API, plays it, and APPROVE commits the returned mp3 and the list in one commit, purging a replaced file in that same commit. PURGE UNUSED removes files for lines no scene plays and files the list does not name. Voice plan in `data/voice-slots.json`: the account has a cap of 30 custom voices shared with the first game; the page shows the account count and refuses a plan over this game's custom-voice budget (2 until the cast round). Premade voices do not count.
+- New `music.html` (Music Library): generate (ElevenLabs music, instrumental) or upload an mp3, play it, APPROVE commits the track and list in one commit; assign tracks to title, fights, boss and each area; DELETE removes the file, entry and assignments in one commit. Shows a credit estimate before generating.
+- `admin-lib.js`: `ghCommit()` (several files written and deleted in one commit through the Git Data API), `ghList()`, `EL_BASE()` (`?el=` points a page at a test stub). Voices and Music added to the admin nav.
+- Tests: `tools/smoke.py` 88/88 (title and a whole chapter request no audio file when no files are listed); `tools/test_tools.py` 252/252 (new: game audio in both orientations, Voice Library and Music Library against stubbed ElevenLabs and GitHub in both orientations). Cache tag ?v=1e.
+
 ## 1d.2 (2026-11-12): Head Sizes, Portraits and Area editor
 
 - New `heads.html` (Head Sizes), `portraits.html` (Portraits) and `areas.html` (Area editor): three phone pages that commit to main through the GitHub token saved by the Art Library (same `ffiv-gh-token` and `ffiv-repo` keys, no second setup). Shared code is in `admin-lib.js`, which `art.html` now uses too (its behaviour is unchanged).

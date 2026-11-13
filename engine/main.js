@@ -54,6 +54,7 @@ function setArea(id,spawn) {
   w.x=w.fromX=w.toX=spawn.x; w.y=w.fromY=w.toY=spawn.y;
   w.moving=false; w.t=0;
   game.path=null;
+  musicFor('area:'+id);
 }
 // Where the walker is drawn, in tiles (fractional while a step is under way).
 function walkerPos() { return actorPos(game.walker); }
@@ -208,6 +209,10 @@ const actBtn=document.getElementById('act');
 actBtn.addEventListener('pointerdown',e=>{ e.preventDefault(); actBtn.classList.add('pressed'); action(); });
 ['pointerup','pointercancel','pointerleave'].forEach(t=>actBtn.addEventListener(t,()=>actBtn.classList.remove('pressed')));
 document.getElementById('rotate').addEventListener('click',toggleLayout);
+const soundBtn=document.getElementById('sound');
+function showSound() { soundBtn.textContent=AUDIO.muted?'SOUND OFF':'SOUND ON'; }
+soundBtn.addEventListener('click',()=>{ setMuted(!AUDIO.muted); showSound(); });
+showSound();
 document.addEventListener('contextmenu',e=>e.preventDefault());
 
 const padPrev={};
@@ -257,8 +262,10 @@ async function loadInstalledAreas() {
 addEventListener('resize',layout);
 layout();
 document.documentElement.classList.add('js-running');
-loadInstalledAreas().catch(e=>{ areasNote=String(e.message||e); console.warn('installed areas not loaded:',areasNote); })
-  .finally(()=>{ areasReady=true; requestAnimationFrame(frame); });
+Promise.all([
+  loadInstalledAreas().catch(e=>{ areasNote=String(e.message||e); console.warn('installed areas not loaded:',areasNote); }),
+  loadAudioLists().catch(()=>{})
+]).finally(()=>{ areasReady=true; musicFor('title'); requestAnimationFrame(frame); });
 
 // Debug handle for tools/smoke.py and for checking a build by hand in the console.
 window.__FFIV={
@@ -285,6 +292,7 @@ window.__FFIV={
   get flags(){ return Object.assign({},STORY.flags); },
   get objective(){ return STORY.objective; },
   get done(){ return Object.assign({},STORY.done); },
+  get audio(){ return {ready:AUDIO.ready,muted:AUDIO.muted,music:AUDIO.musicId,log:AUDIO.log.map(r=>Object.assign({},r)),voiceLines:Object.keys(AUDIO.lines).length,tracks:Object.keys(AUDIO.music.tracks).length}; },
   get scene(){ return game.scene?{id:game.scene.id,step:game.scene.i}:null; },
   get say(){ return game.scene&&game.scene.say?game.scene.say.text:null; },
   get card(){ return game.card?game.card.lines.slice():null; },
