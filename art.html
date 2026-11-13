@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161d1b">
+<title>Art Library</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#161d1b;color:#e2e8e4;font:15px/1.4 system-ui,-apple-system,sans-serif;padding:12px 12px 60px;max-width:640px;margin:0 auto}
+h1{font-size:20px;margin:4px 0 10px}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#9fb0a8;margin:18px 0 6px}
+.box{background:#222c29;border-radius:10px;padding:10px;margin-bottom:10px}
+label{display:block;font-size:12px;color:#9fb0a8;margin:8px 0 2px}
+input,textarea,select{width:100%;background:#12181a;color:#e2e8e4;border:1px solid #3a4a45;border-radius:8px;padding:9px;font:inherit}
+textarea{min-height:120px}
+button{background:#3f5c54;color:#fff;border:0;border-radius:8px;padding:11px 14px;font:inherit;font-weight:600;margin:6px 6px 0 0}
+button.alt{background:#2e3b37}
+button.go{background:#2f7a4f}
+button.no{background:#8a4040}
+button:disabled{opacity:.4}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+.item{padding:9px;border-radius:8px;background:#12181a;margin-bottom:6px;border:1px solid transparent}
+.item.sel{border-color:#6fb99d}
+.item small{color:#9fb0a8;display:block}
+.tag{font-size:11px;background:#3a4a45;border-radius:5px;padding:1px 6px;margin-left:6px}
+.tag.ok{background:#2f7a4f}
+#shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.shot{background:#12181a;border-radius:8px;padding:4px;border:2px solid transparent}
+.shot.sel{border-color:#6fb99d}
+.shot img{width:100%;display:block;border-radius:6px;background:repeating-conic-gradient(#2a2e2c 0 25%,#1c2220 0 50%) 0 0/16px 16px}
+.shot small{color:#9fb0a8;font-size:11px}
+#status{position:sticky;top:0;background:#0e1311;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;min-height:36px;z-index:2}
+#status.err{color:#ffb4a8}
+.muted{color:#9fb0a8;font-size:12px}
+</style>
+</head>
+<body>
+<h1>Art Library</h1>
+<div id="status" role="status">Ready.</div>
+
+<h2>1. Setup</h2>
+<div class="box">
+  <label for="xkey">xAI image key (stays on this phone)</label>
+  <input id="xkey" type="password" autocomplete="off" placeholder="xai-...">
+  <label for="ghtoken">GitHub token for the game repo (Contents read and write)</label>
+  <input id="ghtoken" type="password" autocomplete="off" placeholder="github_pat_...">
+  <label for="repo">Repo</label>
+  <input id="repo" value="trivituso81/game">
+  <label for="model">Image model</label>
+  <input id="model" value="grok-imagine-image">
+  <label for="relay">Relay address (leave empty unless Generate is blocked by the browser)</label>
+  <input id="relay" placeholder="https://...">
+  <div class="row"><button id="save">SAVE SETUP</button><button id="testgh" class="alt">TEST GITHUB</button></div>
+  <p class="muted">Spent so far (estimate, $0.04 per picture plus $0.01 per reference picture): <b id="spend">$0.00</b>
+    <button id="spendreset" class="alt" style="padding:4px 8px;font-size:12px">RESET</button></p>
+</div>
+
+<h2>2. Pick a picture</h2>
+<div id="list"></div>
+
+<h2>3. Make it</h2>
+<div class="box" id="work" hidden>
+  <b id="wtitle"></b> <span class="muted" id="wid"></span>
+  <label for="prompt">Prompt (you can edit it; Approve saves the edited text)</label>
+  <textarea id="prompt"></textarea>
+  <label for="refs">Reference pictures (optional, up to 3)</label>
+  <input id="refs" type="file" accept="image/*" multiple>
+  <div class="row">
+    <button id="gen" class="go">GENERATE</button>
+    <button id="upbtn" class="alt">UPLOAD MY OWN</button>
+  </div>
+  <input id="upfile" type="file" accept="image/*" hidden>
+</div>
+
+<h2>4. Results (last 5)</h2>
+<div id="shots"></div>
+<div class="box" id="decide" hidden>
+  <label for="note">Note for Claude if you reject (what is wrong)</label>
+  <input id="note" placeholder="e.g. head too big, wrong colors">
+  <div class="row"><button id="approve" class="go">APPROVE</button><button id="reject" class="no">REJECT</button></div>
+</div>
+
+<script>
+'use strict';
+// Art Library (Build 1d.1). One page, no build step. Keys live in this phone's localStorage (prefix ffiv-) and are never written to the repo.
+const $=id=>document.getElementById(id);
+const LS={get:k=>{try{return localStorage.getItem('ffiv-'+k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem('ffiv-'+k,v)}catch(e){}}};
+const COST_IMAGE=0.04, COST_REF=0.01;
+const MAX_KEPT=5;
+const state={items:[],ingame:{installed:{}},notes:{notes:[]},sel:null,shots:[],shot:null,busy:false};
+
+function say(msg,err){ const s=$('status'); s.textContent=msg; s.className=err?'err':''; }
+
+// ---------- setup ----------
+function loadSetup(){
+  $('xkey').value=LS.get('xai-key')||''; $('ghtoken').value=LS.get('gh-token')||'';
+  $('repo').value=LS.get('repo')||'trivituso81/game'; $('model').value=LS.get('model')||'grok-imagine-image';
+  $('relay').value=LS.get('relay')||''; showSpend();
+}
+function saveSetup(){
+  LS.set('xai-key',$('xkey').value.trim()); LS.set('gh-token',$('ghtoken').value.trim());
+  LS.set('repo',$('repo').value.trim()); LS.set('model',$('model').value.trim()); LS.set('relay',$('relay').value.trim());
+  say('Setup saved on this phone.');
+}
+function spend(){ return parseFloat(LS.get('spend')||'0')||0; }
+function addSpend(d){ LS.set('spend',String(Math.round((spend()+d)*100)/100)); showSpend(); }
+function showSpend(){ $('spend').textContent='$'+spend().toFixed(2); }
+
+// ---------- IndexedDB (last 5 results per picture) ----------
+function db(){ return new Promise((res,rej)=>{ const r=indexedDB.open('ffiv-art',1); r.onupgradeneeded=()=>r.result.createObjectStore('shots',{keyPath:'key',autoIncrement:true}); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function dbAll(){ const d=await db(); return new Promise((res,rej)=>{ const q=d.transaction('shots').objectStore('shots').getAll(); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+async function dbAdd(rec){ const d=await db(); return new Promise((res,rej)=>{ const q=d.transaction('shots','readwrite').objectStore('shots').add(rec); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+async function dbDel(key){ const d=await db(); return new Promise((res,rej)=>{ const q=d.transaction('shots','readwrite').objectStore('shots').delete(key); q.onsuccess=()=>res(); q.onerror=()=>rej(q.error); }); }
+async function loadShots(){
+  const all=(await dbAll()).filter(s=>s.itemId===state.sel).sort((a,b)=>a.ts-b.ts);
+  while(all.length>MAX_KEPT){ const old=all.shift(); await dbDel(old.key); }
+  state.shots=all.reverse();
+  if(!state.shots.find(s=>s.key===state.shot)) state.shot=state.shots.length?state.shots[0].key:null;
+  drawShots();
+}
+function drawShots(){
+  const box=$('shots'); box.innerHTML='';
+  state.shots.forEach(s=>{
+    const d=document.createElement('div'); d.className='shot'+(s.key===state.shot?' sel':''); d.dataset.key=s.key;
+    const im=document.createElement('img'); im.src=URL.createObjectURL(s.blob); d.appendChild(im);
+    const t=document.createElement('small'); t.textContent=(s.source==='upload'?'uploaded ':'generated ')+new Date(s.ts).toLocaleTimeString(); d.appendChild(t);
+    d.onclick=()=>{ state.shot=s.key; drawShots(); };
+    box.appendChild(d);
+  });
+  $('decide').hidden=!state.shots.length;
+}
+
+// ---------- prompt list ----------
+async function loadData(){
+  try{
+    const [p,i,n]=await Promise.all(['data/art-prompts.json','data/art-ingame.json','data/art-notes.json'].map(u=>fetch(u+'?t='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null)));
+    state.items=(p&&p.items)||[]; state.ingame=i||{installed:{}}; state.notes=n||{notes:[]};
+  }catch(e){ say('Could not read the prompt list: '+e.message,true); }
+  drawList();
+}
+function drawList(){
+  const box=$('list'); box.innerHTML='';
+  if(!state.items.length){ box.innerHTML='<div class="box muted">No prompts yet. Claude adds them to data/art-prompts.json.</div>'; return; }
+  state.items.forEach(it=>{
+    const d=document.createElement('div'); d.className='item'+(it.id===state.sel?' sel':''); d.dataset.id=it.id;
+    const inst=state.ingame.installed&&state.ingame.installed[it.id];
+    d.innerHTML='<b></b><span class="tag"></span>'+(inst?'<span class="tag ok">IN GAME</span>':'')+'<small></small>';
+    d.querySelector('b').textContent=it.title||it.id; d.querySelector('.tag').textContent=it.kind||'';
+    d.querySelector('small').textContent=it.id;
+    d.onclick=()=>pick(it.id); box.appendChild(d);
+  });
+}
+async function pick(id){
+  state.sel=id; const it=state.items.find(x=>x.id===id);
+  $('work').hidden=false; $('wtitle').textContent=it.title||it.id; $('wid').textContent=it.id; $('prompt').value=it.prompt||'';
+  drawList(); await loadShots();
+}
+
+// ---------- xAI ----------
+function fileToDataUrl(f){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(f); }); }
+function b64ToBlob(b64,mime){ const bin=atob(b64), a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return new Blob([a],{type:mime||'image/png'}); }
+async function generate(){
+  if(state.busy||!state.sel) return;
+  const key=LS.get('xai-key'); if(!key){ say('Enter your xAI key in Setup first.',true); return; }
+  const it=state.items.find(x=>x.id===state.sel), prompt=$('prompt').value.trim(); if(!prompt){ say('The prompt is empty.',true); return; }
+  const refs=[...$('refs').files].slice(0,3);
+  state.busy=true; $('gen').disabled=true; say('Generating... (about 10 to 30 seconds)');
+  try{
+    const base=(LS.get('relay')||'https://api.x.ai').replace(/\/+$/,'');
+    const model=LS.get('model')||'grok-imagine-image';
+    let url, body;
+    if(refs.length){
+      const imgs=[]; for(const f of refs) imgs.push({url:await fileToDataUrl(f)});
+      url=base+'/v1/images/edits'; body={model,prompt,images:imgs,n:1,response_format:'b64_json'};
+    } else {
+      url=base+'/v1/images/generations'; body={model,prompt,n:1,response_format:'b64_json'};
+      if(it.size) body.aspect_ratio=it.size;
+    }
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
+    const txt=await r.text(); let j; try{ j=JSON.parse(txt); }catch(e){ j=null; }
+    if(!r.ok){ throw new Error('xAI said '+r.status+': '+(j&&(j.error&&(j.error.message||j.error)||j.message)||txt.slice(0,200))); }
+    const d=j&&j.data&&j.data[0]; if(!d||!d.b64_json) throw new Error('No picture came back.');
+    const blob=b64ToBlob(d.b64_json,d.mime_type||'image/png');
+    await dbAdd({itemId:state.sel,ts:Date.now(),blob,prompt,source:'xai'});
+    addSpend(COST_IMAGE+COST_REF*refs.length);
+    await loadShots(); say('Done. Tap a picture, then APPROVE or REJECT.');
+  }catch(e){
+    say((e instanceof TypeError?'The browser blocked the request (no relay set). ':'')+e.message,true);
+  }finally{ state.busy=false; $('gen').disabled=false; }
+}
+async function upload(f){
+  if(!f||!state.sel) return;
+  await dbAdd({itemId:state.sel,ts:Date.now(),blob:f,prompt:$('prompt').value.trim(),source:'upload'});
+  await loadShots(); say('Uploaded. Tap it, then APPROVE or REJECT.');
+}
+
+// ---------- GitHub ----------
+function ghHeaders(){ return {'Authorization':'Bearer '+LS.get('gh-token'),'Accept':'application/vnd.github+json','Content-Type':'application/json'}; }
+function repoUrl(path){ return 'https://api.github.com/repos/'+LS.get('repo')+'/contents/'+path.split('/').map(encodeURIComponent).join('/'); }
+async function ghGet(path){
+  const r=await fetch(repoUrl(path)+'?ref=main&t='+Date.now(),{headers:ghHeaders()});
+  if(r.status===404) return null;
+  if(!r.ok) throw new Error('GitHub said '+r.status+' reading '+path);
+  return r.json();
+}
+async function ghPut(path,b64,message){
+  const cur=await ghGet(path);
+  const body={message,content:b64,branch:'main'}; if(cur&&cur.sha) body.sha=cur.sha;
+  const r=await fetch(repoUrl(path),{method:'PUT',headers:ghHeaders(),body:JSON.stringify(body)});
+  if(!r.ok){ const t=await r.text(); throw new Error('GitHub said '+r.status+' writing '+path+': '+t.slice(0,160)); }
+  return r.json();
+}
+const toB64=s=>btoa(unescape(encodeURIComponent(s)));
+function blobToB64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(blob); }); }
+function extOf(blob){ const t=(blob.type||'').toLowerCase(); return t.includes('jpeg')||t.includes('jpg')?'jpg':t.includes('webp')?'webp':'png'; }
+async function readJson(path,fallback){
+  const cur=await ghGet(path); if(!cur) return fallback;
+  try{ return JSON.parse(decodeURIComponent(escape(atob(cur.content.replace(/\n/g,''))))); }catch(e){ return fallback; }
+}
+function needGh(){ if(!LS.get('gh-token')||!LS.get('repo')){ say('Enter the GitHub token and repo in Setup first.',true); return false; } return true; }
+async function testGh(){
+  if(!needGh()) return;
+  try{ const r=await fetch('https://api.github.com/repos/'+LS.get('repo'),{headers:ghHeaders()}); if(!r.ok) throw new Error('GitHub said '+r.status); const j=await r.json(); say('GitHub works. Push access: '+(j.permissions&&j.permissions.push?'yes':'NO, the token cannot write.'),!(j.permissions&&j.permissions.push)); }
+  catch(e){ say(e.message,true); }
+}
+function curShot(){ return state.shots.find(s=>s.key===state.shot)||null; }
+async function approve(){
+  if(state.busy||!needGh()) return; const s=curShot(); if(!s){ say('Tap a picture first.',true); return; }
+  state.busy=true; say('Approving: saving the picture and prompt to the game repo...');
+  try{
+    const id=state.sel, ext=extOf(s.blob), path='art/'+id+'.'+ext;
+    const old=state.ingame.installed&&state.ingame.installed[id];
+    await ghPut(path,await blobToB64(s.blob),'Art: approve '+id);
+    await ghPut('art/'+id+'.prompt.txt',toB64($('prompt').value.trim()+'\n'),'Art: prompt for '+id);
+    const ing=await readJson('data/art-ingame.json',{installed:{}}); ing.installed=ing.installed||{};
+    ing.installed[id]={path,approved:new Date().toISOString().slice(0,10)};
+    await ghPut('data/art-ingame.json',toB64(JSON.stringify(ing,null,2)+'\n'),'Art: list '+id+' as in game');
+    state.ingame=ing; drawList();
+    say('Approved '+id+'. It is in the game repo as '+path+(old&&old.path!==path?' (the old '+old.path+' stays until Claude purges it)':'')+'.');
+  }catch(e){ say(e.message,true); }
+  finally{ state.busy=false; }
+}
+async function reject(){
+  if(state.busy||!needGh()) return; const s=curShot(); if(!s){ say('Tap a picture first.',true); return; }
+  const note=$('note').value.trim(); if(!note){ say('Type a short note for Claude first.',true); return; }
+  state.busy=true; say('Rejecting: saving your note...');
+  try{
+    const n=await readJson('data/art-notes.json',{notes:[]}); n.notes=n.notes||[];
+    n.notes.push({id:state.sel,date:new Date().toISOString().slice(0,10),prompt:$('prompt').value.trim(),note});
+    await ghPut('data/art-notes.json',toB64(JSON.stringify(n,null,2)+'\n'),'Art: reject note for '+state.sel);
+    await dbDel(s.key); $('note').value=''; await loadShots();
+    say('Rejected. Your note is saved for Claude.');
+  }catch(e){ say(e.message,true); }
+  finally{ state.busy=false; }
+}
+
+$('save').onclick=saveSetup; $('testgh').onclick=testGh; $('gen').onclick=generate;
+$('upbtn').onclick=()=>$('upfile').click(); $('upfile').onchange=e=>{ upload(e.target.files[0]); e.target.value=''; };
+$('approve').onclick=approve; $('reject').onclick=reject;
+$('spendreset').onclick=()=>{ LS.set('spend','0'); showSpend(); };
+loadSetup(); loadData();
+window.__ART={state,pick,generate,approve,reject,upload};
+</script>
+</body>
+</html>

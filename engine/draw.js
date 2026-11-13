@@ -33,7 +33,16 @@ function drawTile(area,x,y,ch) {
   }
 }
 
+// Installed areas carry a picture; it is drawn over the whole mask until the picture has loaded, then instead of the grey tiles.
+const ART_CACHE=new Map();
+function artImage(path) {
+  let im=ART_CACHE.get(path);
+  if(!im) { im=new Image(); im.src=path+'?v='+ART_TAG; ART_CACHE.set(path,im); }
+  return im.complete&&im.naturalWidth>0?im:null;
+}
 function drawArea(area) {
+  const pic=area.art?artImage(area.art):null;
+  if(pic) { ctx.drawImage(pic,0,0,area.w*T,area.h*T); return; }
   const x0=Math.max(0,Math.floor(game.camX/T)), x1=Math.min(area.w-1,Math.floor((game.camX+game.LW)/T));
   const y0=Math.max(0,Math.floor(game.camY/T)), y1=Math.min(area.h-1,Math.floor((game.camY+game.LH)/T));
   for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) drawTile(area,x,y,area.grid[y][x]);

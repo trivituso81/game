@@ -1,0 +1,7 @@
+{
+  "note": "One file for every height and the ONE head multiplier. heights are in output pixels (tallest frame). head 1.0 leaves heads alone; head_frac is the top share of the figure treated as the head.",
+  "head": 1.0,
+  "head_frac": 0.3,
+  "default": {"battle": 56, "walk": 28},
+  "heights": {}
+}

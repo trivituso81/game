@@ -2,6 +2,16 @@
 
 Every push adds an entry here. Newest first.
 
+## 1d.1 (2026-11-12): Art Library, generic bakers, area installer
+
+- New `art.html` (Art Library), a phone page. Setup box (xAI key, GitHub token, repo, model, optional relay) kept in this phone's localStorage under `ffiv-`, never in the repo. Prompt list from `data/art-prompts.json` (one TEST prompt for now). GENERATE calls the xAI image API from the phone (`grok-imagine-image`, b64 result; with reference pictures it uses the edits endpoint). UPLOAD MY OWN is the free alternative. Last 5 results per picture are kept on the phone (IndexedDB). APPROVE commits the picture (`art/<id>.<ext>`), the edited prompt (`art/<id>.prompt.txt`) and the list `data/art-ingame.json` to main through the GitHub API. REJECT commits Tom's note to `data/art-notes.json` and drops the picture. Spend counter is an estimate ($0.04 per picture, $0.01 per reference).
+- New `tools/sprite-bake/`: `bake_character.py` and `bake_enemy.py` (one spec file per character or enemy, no per-character code), shared `bakelib.py`, and `heights.json` (every height plus the ONE head multiplier). Sheet rules: solid magenta background; characters are battle 2 rows of 6 and walk 3 rows of 4; enemies default to 4 x 1. One scale per sheet so walk cycles do not jitter; figures stand on the bottom centre of their cell. A sheet that is not on magenta fails with a clear message.
+- New `tools/install_area.py`: checks an area spec against the same rules as `validateWorld()`, saves the picture at 2x logical size, writes `data/areas/<id>.json`, regenerates `engine/areas-data.js`, bumps `ART_TAG` and the `?v=` tag on that script. Replacing an area purges its old picture; `--remove` purges everything.
+- Engine: `engine/areas-data.js` (generated, empty for now), `areaFromData()` in `world.js`, and `drawArea()` in `draw.js` draws an installed area's picture instead of the grey tiles once it has loaded.
+- New `tools/test_tools.py`: 68 checks on grey placeholders in a temporary copy of the repo (bakers, installer, installed area drawn in the game, art.html end to end against stubbed xAI and GitHub in portrait and landscape). `tools/smoke.py` still 84/84.
+- Cache tags bumped to `?v=1d1`.
+- Known: not yet tried with the real xAI and GitHub services (needs Tom's keys on his phone). If the browser blocks Generate, a relay address is needed. The head multiplier treats the top 30 percent of a figure as the head; check by eye on the first real character.
+
 ## 1c (2026-11-12): story engine with a placeholder chapter
 
 - New `engine/story.js`: story state (chapter, flags, objective, done), the chapter list, the cutscene runner and the scene scripts. A scene is a list of plain steps; ops: wait, walk, face, say, camera, fade, spawn, remove, flag, objective, battle, closeup, end. A fight inside a scene replays after a loss, so a scene never skips it.

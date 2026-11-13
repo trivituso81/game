@@ -1,6 +1,6 @@
 # Game (trivituso81/game)
 
-A new JRPG on a fresh engine. Currently at Build 1c: placeholder world, grey fights and a story engine with one placeholder chapter. No story, cast or art yet.
+A new JRPG on a fresh engine. Currently at Build 1d.1 (adds the Art Library page, bakers and area installer; the game itself is as in 1c). Build 1c: placeholder world, grey fights and a story engine with one placeholder chapter. No story, cast or art yet.
 
 ## Run it
 
@@ -28,5 +28,9 @@ Leave `CHROMIUM` unset to use Playwright's own Chromium. Screenshots go to `/tmp
 | `engine/battle.js`, `engine/battle-draw.js` | Fight rules and the battle screen |
 | `engine/story.js`, `engine/story-draw.js` | Chapters, cutscene runner, scene scripts, cards, close-ups |
 | `engine/main.js` | Layout, input, walking, transitions, frame loop, debug handle |
-| `tools/smoke.py` | Headless test |
+| `art.html`, `data/art-*.json` | Art Library page and its prompt, in-game and note lists |
+| `tools/sprite-bake/` | Generic character and enemy bakers, `heights.json` |
+| `tools/install_area.py`, `data/areas/`, `engine/areas-data.js` | Area installer, its data and generated list |
+| `tools/smoke.py` | Headless test of the game |
+| `tools/test_tools.py` | Headless test of the Art Library, bakers and installer |
 | `docs/CHANGES.md` | One entry per push |

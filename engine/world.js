@@ -1,5 +1,5 @@
 'use strict';
-// engine/world.js: Build 1b placeholder world. Three grey areas, each with a walk mask, portals and (field only) grey fights. No names, no art.
+// engine/world.js: Build 1d.1 placeholder world plus installed areas (engine/areas-data.js, written by tools/install_area.py). Three grey areas, each with a walk mask, portals and (field only) grey fights. No names, no art.
 // Walk mask legend: '#' blocked, '.' walkable, 'D' door (walk onto it to go in), 'M' mat (walk onto it to go out),
 // 'E' edge (walk onto it to go on to the next area), 'L' locked door (a door that is a wall until its flag is set).
 // Doors, mats, edges and locked doors are portals; each portal says where it leads. Triggers (not drawn in the mask) start a scene.
@@ -73,6 +73,18 @@ const AREAS={
     spawn:{x:5,y:6}
   })
 };
+
+// Areas written by tools/install_area.py. Each has an explicit mask (rows of the legend above) and a picture path (area.art).
+function areaFromData(d) {
+  const g=d.mask.map(r=>[...r]);
+  const portals=new Map(), triggers=new Map(), locks=new Map();
+  for(const p of (d.portals||[])) portals.set(p.x+','+p.y,{to:p.to,spawn:p.spawn});
+  for(const t of (d.triggers||[])) triggers.set(t.x+','+t.y,t.scene);
+  for(const l of (d.locks||[])) locks.set(l.x+','+l.y,l.flag);
+  const monsters=(d.monsters||[]).map(m=>({id:m.id,kind:m.kind,x:m.x,y:m.y,alive:true}));
+  return {id:d.id,name:d.name,w:g[0].length,h:g.length,grid:g,portals,monsters,triggers,locks,spawn:d.spawn,indoor:!!d.indoor,art:d.art||null};
+}
+for(const d of INSTALLED_AREAS) AREAS[d.id]=areaFromData(d);
 
 function inside(area,x,y) { return x>=0&&y>=0&&x<area.w&&y<area.h; }
 function lockOpen(area,x,y) { const f=area.locks.get(x+','+y); return !!(f&&STORY.flags[f]); }

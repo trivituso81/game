@@ -1,0 +1,12 @@
+{
+  "note": "Prompts for the Art Library (art.html). Add one entry per picture. kind is character, enemy, area or object. size is the aspect ratio.",
+  "items": [
+    {
+      "id": "test-grey-figure",
+      "title": "TEST: grey figure",
+      "kind": "character",
+      "size": "1:1",
+      "prompt": "A plain grey placeholder figure, front view, centered, flat shading, on a solid magenta (#FF00FF) background. No text, no shadow."
+    }
+  ]
+}
