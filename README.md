@@ -1,6 +1,6 @@
 # Game (trivituso81/game)
 
-A new JRPG on a fresh engine. Currently at Build 1e (voice and music as real audio files; Voice Library and Music Library pages). Build 1d.2 (adds the Head Sizes, Portraits and Area editor pages; areas are now read from `data/areas/` at boot). Build 1c: placeholder world, grey fights and a story engine with one placeholder chapter. No story, cast or art yet.
+A new JRPG on a fresh engine. The blank engine is complete (Build 1f): placeholder world, grey fights, a story engine with one placeholder chapter, six admin pages, voice and music as real audio files, a service worker, and docs. No story, cast or art yet. Start with `CLAUDE.md`.
 
 ## Run it
 
@@ -16,7 +16,12 @@ Headless test (portrait and landscape):
 CHROMIUM=/usr/bin/google-chrome python3 tools/smoke.py
 ```
 
-Leave `CHROMIUM` unset to use Playwright's own Chromium. Screenshots go to `/tmp/ffiv-shots`.
+Leave `CHROMIUM` unset to use Playwright's own Chromium. Screenshots go to `/tmp/ffiv-shots`. The other two checks run before every push:
+
+```
+CHROMIUM=/usr/bin/google-chrome python3 tools/test_tools.py
+python3 tools/check_repo.py
+```
 
 ## Layout of the code
 
@@ -35,5 +40,7 @@ Leave `CHROMIUM` unset to use Playwright's own Chromium. Screenshots go to `/tmp
 | `engine/areacheck.js` | Area check in JavaScript (same rules as the installer) |
 | `tools/install_area.py`, `data/areas/` | Area installer; area files and `index.json` (the list the game reads at boot) |
 | `tools/smoke.py` | Headless test of the game |
-| `tools/test_tools.py` | Headless test of the Art Library, bakers and installer |
-| `docs/CHANGES.md` | One entry per push |
+| `tools/test_tools.py` | Headless test of the bakers, installer, admin pages, audio and service worker |
+| `tools/check_repo.py` | Cache tags, banned first-game names, long dashes, docs present |
+| `sw.js` | Service worker for the game page (rules in `docs/ARCHITECTURE.md`) |
+| `CLAUDE.md`, `docs/` | Working agreement, architecture, battle system, pipelines, workflow, canon, changes |

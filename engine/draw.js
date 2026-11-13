@@ -108,7 +108,7 @@ function drawTitle(time) {
   ctx.font='9px monospace'; ctx.fillStyle='#8c9692';
   ctx.fillText('LEFT, RIGHT or tap to change it',cx,cy+56);
   ctx.font='10px monospace'; ctx.fillStyle='#8c9692';
-  ctx.fillText('Build 1c, placeholder',cx,game.LH-22);
+  ctx.fillText('Build 1f, placeholder',cx,game.LH-22);
 }
 
 function fadeAlpha() {

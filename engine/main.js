@@ -1,5 +1,5 @@
 'use strict';
-// engine/main.js: Build 1c shell. Layout (portrait and landscape), input (keys, gamepad, on-screen D-pad and A, tap to walk),
+// engine/main.js: the shell. Layout (portrait and landscape), input (keys, gamepad, on-screen D-pad and A, tap to walk),
 // walking, doors and edges, grey fights (battle.js), the story flow (story.js: chapters, cards, scenes, close-ups), fades, and the frame loop. Loaded last; shares one scope with the other engine files.
 const KEYS={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};
 const DIRS={up:{x:0,y:-1},down:{x:0,y:1},left:{x:-1,y:0},right:{x:1,y:0}};
@@ -266,6 +266,12 @@ Promise.all([
   loadInstalledAreas().catch(e=>{ areasNote=String(e.message||e); console.warn('installed areas not loaded:',areasNote); }),
   loadAudioLists().catch(()=>{})
 ]).finally(()=>{ areasReady=true; musicFor('title'); requestAnimationFrame(frame); });
+
+// Service worker (sw.js): lets the game start with no network after one online visit. A browser driven by a test does not register it,
+// so tests see plain network behaviour; a test that wants it opens index.html?sw=1.
+if('serviceWorker' in navigator&&(!navigator.webdriver||/[?&]sw=1/.test(location.search))) {
+  addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(e=>console.warn('service worker not registered:',e.message)); });
+}
 
 // Debug handle for tools/smoke.py and for checking a build by hand in the console.
 window.__FFIV={

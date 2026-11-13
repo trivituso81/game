@@ -12,6 +12,7 @@ import base64
 import io
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -822,6 +823,86 @@ def music_part(tmp, browser):
     os.remove(f'{tmp}/up.mp3')
 
 
+def sw_part(tmp, browser, stop_server, start_server):
+    """Build 1f: the service worker. One online visit, then the game starts with the server off; an update shows on the next refresh;
+    the admin pages are left alone; the repo check catches a tag that was not moved."""
+    base = f'http://127.0.0.1:{PORT}'
+    # earlier parts removed area files by hand; make the served list name only the files that exist
+    idx = json.load(open(f'{tmp}/data/areas/index.json'))
+    idx['areas'] = [a for a in idx['areas'] if os.path.exists(f'{tmp}/data/areas/{a}.json')]
+    json.dump(idx, open(f'{tmp}/data/areas/index.json', 'w'))
+    ctx = browser.new_context(viewport={'width': 390, 'height': 844})
+    page = ctx.new_page()
+    errors = []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(f'{base}/index.html')
+    page.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+    time.sleep(0.5)
+    check('sw: a test browser without ?sw=1 registers no service worker', page.evaluate('async () => (await navigator.serviceWorker.getRegistrations()).length') == 0)
+    page.goto(f'{base}/index.html?sw=1')
+    page.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+    page.wait_for_function('() => !!navigator.serviceWorker.controller', timeout=15000)
+    tag = re.search(r"const SW_TAG='([^']+)'", open(f'{tmp}/sw.js').read()).group(1)
+    keys = page.evaluate("async (n) => (await (await caches.open(n)).keys()).map(r => r.url)", 'ffiv-shell-' + tag)
+    check('sw: the shell (index.html and 8 engine scripts) is saved after one visit', len(keys) == 9 and sum('/engine/' in k and f'?v={tag}' in k for k in keys) == 8, keys)
+    page.reload()
+    page.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+    time.sleep(0.5)
+    data_keys = page.evaluate("async () => (await (await caches.open('ffiv-data')).keys()).map(r => new URL(r.url).pathname)")
+    check('sw: online, the installed area list loads clean', page.evaluate('() => __FFIV.areasNote') == '', page.evaluate('() => __FFIV.areasNote'))
+    check('sw: the data lists are saved without their query', sorted(data_keys) == ['/data/areas/index.json', '/data/areas/test-room.json', '/data/music.json', '/data/voice-lines.json'], data_keys)
+    page.evaluate("() => { game.mode='play'; setArea('test-room',{x:5,y:6}); }")
+    page.wait_for_function("() => { const im=artImage('art/areas/test-room.png'); return im && im.complete && im.naturalWidth>0; }", timeout=10000)
+    art_keys = page.evaluate("async () => (await (await caches.open('ffiv-art')).keys()).map(r => new URL(r.url).pathname)")
+    check('sw: a picture is saved once it has been shown', art_keys == ['/art/areas/test-room.png'], art_keys)
+    audio_saved = page.evaluate("async () => { let n=0; for(const k of await caches.keys()) for(const r of await (await caches.open(k)).keys()) if(r.url.includes('/audio/')) n++; return n; }")
+    check('sw: no audio file is saved', audio_saved == 0, audio_saved)
+
+    stop_server()
+    page.reload()
+    page.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+    check('sw: with the server off the game still boots to the title', page.evaluate('() => __FFIV.mode') == 'title' and page.evaluate('() => __FFIV.faults') == [], page.evaluate('() => __FFIV.faults'))
+    check('sw: with the server off the installed area is still there', page.evaluate("() => !!AREAS['test-room']") and page.evaluate('() => __FFIV.areasNote') == '', page.evaluate('() => __FFIV.areasNote'))
+    page.evaluate("() => { game.mode='play'; setArea('test-room',{x:5,y:6}); }")
+    page.wait_for_function("() => { const im=artImage('art/areas/test-room.png'); return im && im.complete && im.naturalWidth>0; }", timeout=10000)
+    check('sw: with the server off its picture still draws', True)
+    page.screenshot(path=f'{SHOTS}/tools-sw-offline.png')
+
+    # An update: new tag in index.html and sw.js, one changed script. A single refresh must show it.
+    html0, sw0, main0 = (open(f'{tmp}/{f}').read() for f in ('index.html', 'sw.js', 'engine/main.js'))
+    open(f'{tmp}/index.html', 'w').write(html0.replace(f'?v={tag}', '?v=zz').replace('<title>Build ' + tag, '<title>Build zz'))
+    open(f'{tmp}/sw.js', 'w').write(sw0.replace(f"SW_TAG='{tag}'", "SW_TAG='zz'"))
+    open(f'{tmp}/engine/main.js', 'w').write(main0 + "\nwindow.__UPDATED='zz';\n")
+    start_server()
+    page.reload()
+    page.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
+    check('sw: one refresh after a push shows the new build', page.title() == 'Build zz' and page.evaluate('() => window.__UPDATED') == 'zz', (page.title(), page.evaluate('() => window.__UPDATED')))
+    page.wait_for_function("async () => { const k=await caches.keys(); return k.includes('ffiv-shell-zz') && !k.some(x => x.startsWith('ffiv-shell-') && x!=='ffiv-shell-zz'); }", timeout=20000)
+    check('sw: the old saved shell is purged once the new one is in', True)
+
+    # Admin pages share the site with the worker and must be left alone: a changed admin file shows at once.
+    lib0 = open(f'{tmp}/admin-lib.js').read()
+    open(f'{tmp}/admin-lib.js', 'w').write(lib0 + "\nwindow.__LIB='fresh';\n")
+    page.goto(f'{base}/heads.html')
+    page.wait_for_function("() => window.__LIB==='fresh'", timeout=10000)
+    check('sw: an admin page under the worker loads fresh files and its nav', page.locator('.nav a').count() >= 6, page.locator('.nav a').count())
+    check('sw: no page errors', not errors, errors)
+    ctx.close()
+
+    # The repo check: passes on the real tags, fails when sw.js is left behind.
+    open(f'{tmp}/sw.js', 'w').write(sw0)
+    r = run([sys.executable, 'tools/check_repo.py', tmp], tmp)
+    check('check_repo fails when index.html moved its tag and sw.js did not', r.returncode == 1 and 'FAIL sw.js: SW_TAG' in r.stdout, r.stdout[-400:])
+    for f, s0 in (('index.html', html0), ('engine/main.js', main0), ('admin-lib.js', lib0)):
+        open(f'{tmp}/{f}', 'w').write(s0)
+    r = run([sys.executable, 'tools/check_repo.py', tmp], tmp)
+    check('check_repo passes on the repo as it is', r.returncode == 0, r.stdout[-600:])
+    name = 'El' + 'lie'                                 # a first-game name, split so this file passes the check itself
+    open(f'{tmp}/docs/CANON.md', 'a').write(f'\n{name} lives here.\n')
+    r = run([sys.executable, 'tools/check_repo.py', tmp], tmp)
+    check('check_repo fails on a first-game name in a doc', r.returncode == 1 and f'docs/CANON.md: {name}' in r.stdout, r.stdout[-400:])
+
+
 def main():
     os.makedirs(SHOTS, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix='ffiv-tools-')
@@ -833,9 +914,17 @@ def main():
     tools_part(tmp, work)
     installer_part(tmp, work)
     parity_part(tmp)
-    srv = subprocess.Popen([sys.executable, '-m', 'http.server', str(PORT), '--bind', '127.0.0.1'], cwd=tmp, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
+    box = {}
+
+    def start_server():
+        box['srv'] = subprocess.Popen([sys.executable, '-m', 'http.server', str(PORT), '--bind', '127.0.0.1'], cwd=tmp, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         wait_port(PORT)
+
+    def stop_server():
+        box['srv'].terminate(); box['srv'].wait()
+
+    start_server()
+    try:
         with sync_playwright() as p:
             kw = {'executable_path': os.environ['CHROMIUM']} if os.environ.get('CHROMIUM') else {}
             browser = p.chromium.launch(args=['--no-sandbox'], **kw)
@@ -847,6 +936,7 @@ def main():
             audio_part(tmp, browser)
             voices_part(tmp, browser)
             music_part(tmp, browser)
+            sw_part(tmp, browser, stop_server, start_server)
             browser.close()
         # remove purges everything
         r = run([sys.executable, 'tools/install_area.py', '--remove', 'test-room', '--root', tmp], tmp)
@@ -854,7 +944,7 @@ def main():
         idx = json.load(open(f'{tmp}/data/areas/index.json'))
         check('index.json is empty again after removal', idx['areas'] == [] and idx['tag'] == '0', idx)
     finally:
-        srv.terminate()
+        box['srv'].terminate()
         shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(work, ignore_errors=True)
     fails = results.count(False)
     print(f'\n{len(results) - fails}/{len(results)} passed')
