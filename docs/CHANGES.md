@@ -2,6 +2,18 @@
 
 Every push adds an entry here. Newest first.
 
+## 1c (2026-11-12): story engine with a placeholder chapter
+
+- New `engine/story.js`: story state (chapter, flags, objective, done), the chapter list, the cutscene runner and the scene scripts. A scene is a list of plain steps; ops: wait, walk, face, say, camera, fade, spawn, remove, flag, objective, battle, closeup, end. A fight inside a scene replays after a loss, so a scene never skips it.
+- New `engine/story-draw.js`: chapter select, title and end cards, the GOAL line, the speech box (top of the window, clear of the controls) and the four close-ups. All fill the window; controls overlay them.
+- Close-ups: REVEAL (one object shown large), WATCH (a short animation that plays once), PLACE (an object lowers onto a spot that lights up), ORDERED (put A, B, C in order; a wrong item is refused with a message).
+- Flow: title, chapter select, title card, play. Walking onto the GO tile in the south of TOWN A runs the opening cutscene (spawn, camera, fade, speech, walk, face, fight, flag, objective). It sets the flag `door-open`; the locked door on the plain house (a wall until then) leads to ROOM B. A tile in ROOM B runs the four close-ups, then the end card, then chapter select shows DONE.
+- `engine/world.js`: new tile `L` (locked door), per-area `locks` and `triggers`, `resetWorld()`, and checks for both. Scene actors share the walker's shape (`actorPos`), so one walk routine moves both. Camera glides during a scene.
+- Debug handle adds `chapter`, `flags`, `objective`, `done`, `scene`, `say`, `card`, `closeup`, `actors`, `startChapter`.
+- `tools/smoke.py`: 84 checks (42 per orientation), all passing. Plays the chapter start to finish, including a refused wrong item in ORDERED.
+- Cache tags bumped to `?v=1c` on all engine scripts.
+- Known: progress (DONE mark) is kept in memory only; saves come later. All text is placeholder.
+
 ## 1b (2026-11-12): battle core with placeholders
 
 - New `engine/battle.js` (rules and state): two grey party members (ATTACK, SPECIAL once per fight, BAG, GUARD), one grey monster, one grey boss with a two-hit shield. Turn order: each living member picks a command in turn, then the enemy acts. No randomness.

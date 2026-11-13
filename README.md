@@ -1,6 +1,6 @@
 # Game (trivituso81/game)
 
-A new JRPG on a fresh engine. Currently at Build 1a: a placeholder shell with grey areas, a placeholder walker, doors and edges. No story, cast or art yet.
+A new JRPG on a fresh engine. Currently at Build 1c: placeholder world, grey fights and a story engine with one placeholder chapter. No story, cast or art yet.
 
 ## Run it
 
@@ -24,7 +24,9 @@ Leave `CHROMIUM` unset to use Playwright's own Chromium. Screenshots go to `/tmp
 |---|---|
 | `index.html` | Markup and CSS for the stage, controls and toast |
 | `engine/world.js` | Tile size, walk masks, portals, path finding, world check |
-| `engine/draw.js` | Drawing: tiles, walker, title, fade |
+| `engine/draw.js` | Drawing: tiles, walker, scene actors, title, fade |
+| `engine/battle.js`, `engine/battle-draw.js` | Fight rules and the battle screen |
+| `engine/story.js`, `engine/story-draw.js` | Chapters, cutscene runner, scene scripts, cards, close-ups |
 | `engine/main.js` | Layout, input, walking, transitions, frame loop, debug handle |
 | `tools/smoke.py` | Headless test |
 | `docs/CHANGES.md` | One entry per push |

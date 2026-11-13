@@ -1,10 +1,11 @@
 'use strict';
 // engine/world.js: Build 1b placeholder world. Three grey areas, each with a walk mask, portals and (field only) grey fights. No names, no art.
 // Walk mask legend: '#' blocked, '.' walkable, 'D' door (walk onto it to go in), 'M' mat (walk onto it to go out),
-// 'E' edge (walk onto it to go on to the next area). Doors, mats and edges are portals; each portal says where it leads.
+// 'E' edge (walk onto it to go on to the next area), 'L' locked door (a door that is a wall until its flag is set).
+// Doors, mats, edges and locked doors are portals; each portal says where it leads. Triggers (not drawn in the mask) start a scene.
 const T=16;                                             // logical pixels per tile
 const MOVE_TIME=0.13;                                   // seconds per tile step
-const PORTAL_CHARS='DME';
+const PORTAL_CHARS='DMEL';
 
 function makeGrid(w,h,fill){ return Array.from({length:h},()=>Array(w).fill(fill)); }
 function stamp(g,x,y,rows){ rows.forEach((r,j)=>[...r].forEach((c,i)=>{ if(c!==' ') g[y+j][x+i]=c; })); }
@@ -18,22 +19,28 @@ function boxedArea(id,name,w,h,opts) {
   const portals=new Map();
   for(const p of opts.portals) portals.set(p.x+','+p.y,{to:p.to,spawn:p.spawn});
   const monsters=(opts.monsters||[]).map(m=>({id:m.id,kind:m.kind,x:m.x,y:m.y,alive:true}));
-  return {id,name,w,h,grid:g,portals,monsters,spawn:opts.spawn,indoor:!!opts.indoor};
+  const triggers=new Map(), locks=new Map();
+  for(const t of (opts.triggers||[])) triggers.set(t.x+','+t.y,t.scene);
+  for(const l of (opts.locks||[])) locks.set(l.x+','+l.y,l.flag);
+  return {id,name,w,h,grid:g,portals,monsters,triggers,locks,spawn:opts.spawn,indoor:!!opts.indoor};
 }
 
 const AREAS={
   town:boxedArea('town','TOWN A',22,40,{
     stamps:[
       {x:3,y:3,rows:['#####','#####','##D##']},          // house with a door
-      {x:14,y:3,rows:['#####','#####','#####']},          // house without one
+      {x:14,y:3,rows:['#####','#####','##L##']},          // house with a locked door (opens when the flag door-open is set)
       {x:3,y:15,rows:['####','####','####']},             // pond
       {x:9,y:26,rows:['###','###']},                      // fence block
       {x:20,y:20,rows:['E']}                              // east edge
     ],
     portals:[
       {x:5,y:5,to:'room',spawn:{x:5,y:6}},
+      {x:16,y:5,to:'roomb',spawn:{x:5,y:6}},
       {x:20,y:20,to:'field',spawn:{x:2,y:20}}
     ],
+    locks:[{x:16,y:5,flag:'door-open'}],
+    triggers:[{x:15,y:30,scene:'opening'}],
     spawn:{x:10,y:31}
   }),
   field:boxedArea('field','FIELD B',22,40,{
@@ -57,11 +64,25 @@ const AREAS={
     ],
     portals:[{x:5,y:7,to:'town',spawn:{x:5,y:6}}],
     spawn:{x:5,y:6}
+  }),
+  roomb:boxedArea('roomb','ROOM B',10,8,{
+    indoor:true,
+    stamps:[{x:5,y:7,rows:['M']}],
+    portals:[{x:5,y:7,to:'town',spawn:{x:16,y:6}}],
+    triggers:[{x:5,y:3,scene:'closeups'}],
+    spawn:{x:5,y:6}
   })
 };
 
 function inside(area,x,y) { return x>=0&&y>=0&&x<area.w&&y<area.h; }
-function walkable(area,x,y) { return inside(area,x,y)&&area.grid[y][x]!=='#'; }
+function lockOpen(area,x,y) { const f=area.locks.get(x+','+y); return !!(f&&STORY.flags[f]); }
+function walkable(area,x,y) {
+  if(!inside(area,x,y)) return false;
+  const c=area.grid[y][x];
+  return c==='L'?lockOpen(area,x,y):c!=='#';
+}
+// A new chapter starts with every fight standing again.
+function resetWorld() { for(const id in AREAS) AREAS[id].monsters.forEach(m=>{ m.alive=true; }); }
 function portalAt(area,x,y) { return area.portals.get(x+','+y)||null; }
 // The live fight standing on a tile, if any. Defeated monsters stay in the list with alive false, so they do not come back.
 function monsterAt(area,x,y) { return area.monsters.find(m=>m.alive&&m.x===x&&m.y===y)||null; }
@@ -75,6 +96,13 @@ function validateWorld() {
       const c=a.grid[y][x], k=x+','+y, p=a.portals.get(k);
       if(PORTAL_CHARS.includes(c)&&!p) out.push(id+' '+k+' '+c+' has no portal entry');
       if(p&&!PORTAL_CHARS.includes(c)) out.push(id+' '+k+' portal entry on a '+c+' tile');
+      if(c==='L'&&!a.locks.has(k)) out.push(id+' '+k+' locked door has no lock entry');
+    }
+    for(const [k,f] of a.locks) if(!f) out.push(id+' '+k+' lock has no flag');
+    for(const [k,sc] of a.triggers) {
+      const [tx,ty]=k.split(',').map(Number);
+      if(!walkable(a,tx,ty)) out.push(id+' '+k+' trigger is not on a walkable tile');
+      if(!SCENES[sc]) out.push(id+' '+k+' trigger names unknown scene '+sc);
     }
     for(const [k,p] of a.portals) {
       const t=AREAS[p.to];

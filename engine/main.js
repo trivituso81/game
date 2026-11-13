@@ -1,6 +1,6 @@
 'use strict';
-// engine/main.js: Build 1b shell. Layout (portrait and landscape), input (keys, gamepad, on-screen D-pad and A, tap to walk),
-// walking, doors and edges, grey fights (battle.js), fades, and the frame loop. Loaded last; shares one scope with the other engine files.
+// engine/main.js: Build 1c shell. Layout (portrait and landscape), input (keys, gamepad, on-screen D-pad and A, tap to walk),
+// walking, doors and edges, grey fights (battle.js), the story flow (story.js: chapters, cards, scenes, close-ups), fades, and the frame loop. Loaded last; shares one scope with the other engine files.
 const KEYS={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};
 const DIRS={up:{x:0,y:-1},down:{x:0,y:1},left:{x:-1,y:0},right:{x:1,y:0}};
 const STORE_KEY='ffiv-layout';
@@ -12,7 +12,8 @@ const input={keys:new Map(),touch:null,pad:null};
 const game={
   mode:'title', area:null, walker:{x:0,y:0,fromX:0,fromY:0,toX:0,toY:0,moving:false,t:0,face:'down'},
   path:null, trans:null, camX:0, camY:0, LW:360, LH:640, k:1, faults:[],
-  party:makeParty(), bag:BAG_START, difficulty:1
+  party:makeParty(), bag:BAG_START, difficulty:1,
+  actors:[], scene:null, card:null, camFocus:null, camSmooth:false, sceneFade:0, chapterCursor:0
 };
 
 // ---------- Layout ----------
@@ -55,12 +56,7 @@ function setArea(id,spawn) {
   game.path=null;
 }
 // Where the walker is drawn, in tiles (fractional while a step is under way).
-function walkerPos() {
-  const w=game.walker;
-  if(!w.moving) return {x:w.x,y:w.y};
-  const t=Math.min(1,w.t);
-  return {x:w.fromX+(w.toX-w.fromX)*t, y:w.fromY+(w.toY-w.fromY)*t};
-}
+function walkerPos() { return actorPos(game.walker); }
 function tryStep(dirName) {
   const w=game.walker, d=DIRS[dirName], nx=w.x+d.x, ny=w.y+d.y;
   w.face=dirName;
@@ -86,11 +82,16 @@ function arrive() {
   const p=portalAt(game.area,game.walker.x,game.walker.y);
   if(p) { startTrans(p.to,p.spawn); return; }
   const m=monsterAt(game.area,game.walker.x,game.walker.y);
-  if(m) startBattle(m.kind,{ref:m});
+  if(m) { startBattle(m.kind,{ref:m}); return; }
+  const sc=game.area.triggers.get(game.walker.x+','+game.walker.y);
+  if(sc&&!STORY.flags['seen:'+sc]) startScene(sc);
 }
 function update(dt) {
   if(game.mode==='battle') { battleUpdate(dt); return; }
+  if(game.mode==='card') { cardUpdate(dt); return; }
+  if(game.mode==='closeup') { closeupUpdate(dt); return; }
   if(game.mode!=='play') return;
+  if(game.scene) { sceneUpdate(dt); return; }
   if(game.trans) { updateTrans(dt); return; }
   const w=game.walker;
   if(w.moving) {
@@ -98,7 +99,7 @@ function update(dt) {
     if(w.t<1) return;
     w.x=w.toX; w.y=w.toY; w.moving=false; w.t=0;
     arrive();
-    if(game.trans||game.mode!=='play') return;
+    if(game.trans||game.mode!=='play'||game.scene) return;
   }
   const held=heldDir();
   if(held) { game.path=null; tryStep(held); return; }
@@ -113,13 +114,15 @@ function update(dt) {
 // ---------- Actions and taps ----------
 function startGame() {
   if(game.mode!=='title') return;
-  game.mode='play';
-  setArea('town',AREAS.town.spawn);
-  toast('Walk with the D-pad or arrow keys, or tap the map.',2600);
+  game.mode='chapters'; game.chapterCursor=0;
 }
 function action() {
   if(game.mode==='title') { startGame(); return; }
+  if(game.mode==='chapters') { chapterConfirm(); return; }
+  if(game.mode==='card') { cardSkip(); return; }
+  if(game.mode==='closeup') { closeupConfirm(); return; }
   if(game.mode==='battle') { battleConfirm(); return; }
+  if(game.scene) { sceneAction(); return; }
   if(game.trans) return;
   const w=game.walker, d=DIRS[w.face];
   if(portalAt(game.area,w.x+d.x,w.y+d.y)) { toast('Walk onto it to go through.'); return; }
@@ -127,7 +130,7 @@ function action() {
 }
 function tapTile(tx,ty) {
   if(game.mode==='title') { startGame(); return; }
-  if(game.mode!=='play'||game.trans) return;
+  if(game.mode!=='play'||game.trans||game.scene) return;
   if(!walkable(game.area,tx,ty)) { toast('Cannot go there.'); return; }
   const path=findPath(game.area,game.walker.x,game.walker.y,tx,ty);
   if(!path) { toast('Cannot get there.'); return; }
@@ -144,6 +147,8 @@ function cycleDifficulty(step) {
 // A direction press: picks a command slot in a fight, or changes difficulty on the title.
 function dirPressed(d) {
   if(game.mode==='battle') battleDir(d);
+  else if(game.mode==='closeup') closeupDir(d);
+  else if(game.mode==='chapters') { /* one chapter for now: nothing to move between */ }
   else if(game.mode==='title'&&(d==='left'||d==='right')) cycleDifficulty(d==='right'?1:-1);
 }
 function clientToTile(cx,cy) {
@@ -159,6 +164,10 @@ function tileToClient(tx,ty) {
 view.addEventListener('click',e=>{
   const p=clientToLogical(e.clientX,e.clientY);
   if(game.mode==='battle') { battleTap(p.x,p.y); return; }
+  if(game.mode==='chapters') { chapterTap(p.x,p.y); return; }
+  if(game.mode==='card') { cardSkip(); return; }
+  if(game.mode==='closeup') { closeupTap(p.x,p.y); return; }
+  if(game.scene) { sceneAction(); return; }
   if(game.mode==='title') {
     if(p.y>game.LH/2+26&&p.y<game.LH/2+62) cycleDifficulty(1); else startGame();
     return;
@@ -169,10 +178,13 @@ view.addEventListener('click',e=>{
 // ---------- Camera ----------
 function updateCamera() {
   if(!game.area) return;
-  const p=walkerPos(), mw=game.area.w*T, mh=game.area.h*T;
+  const fa=game.camFocus?sceneActor(game.camFocus):null, p=fa?actorPos(fa):walkerPos(), mw=game.area.w*T, mh=game.area.h*T;
   const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
-  game.camX=mw<=game.LW?-(game.LW-mw)/2:clamp(p.x*T+T/2-game.LW/2,0,mw-game.LW);
-  game.camY=mh<=game.LH?-(game.LH-mh)/2:clamp(p.y*T+T/2-game.LH/2,0,mh-game.LH);
+  const tx=mw<=game.LW?-(game.LW-mw)/2:clamp(p.x*T+T/2-game.LW/2,0,mw-game.LW);
+  const ty=mh<=game.LH?-(game.LH-mh)/2:clamp(p.y*T+T/2-game.LH/2,0,mh-game.LH);
+  // During a scene the camera glides to its target; otherwise it sits on the hero.
+  if(game.camSmooth) { game.camX+=(tx-game.camX)*.12; game.camY+=(ty-game.camY)*.12; }
+  else { game.camX=tx; game.camY=ty; }
 }
 
 // ---------- Input wiring ----------
@@ -239,7 +251,7 @@ window.__FFIV={
   get area(){ return game.area?game.area.id:null; },
   get walker(){ const p=walkerPos(); return {x:game.walker.x,y:game.walker.y,rx:p.x,ry:p.y}; },
   get landscape(){ return isLandscape(); },
-  get busy(){ return !!game.trans||game.walker.moving||!!(game.path&&game.path.length)||game.mode==='battle'; },
+  get busy(){ return !!game.trans||game.walker.moving||!!(game.path&&game.path.length)||game.mode==='battle'||game.mode==='card'||game.mode==='closeup'||!!game.scene; },
   get faults(){ return faults.slice(); },
   get problems(){ return validateWorld(); },
   get battle(){
@@ -252,5 +264,18 @@ window.__FFIV={
   get difficulty(){ return DIFFICULTY[game.difficulty].label; },
   get lastResult(){ return lastResult; },
   get monsters(){ return game.area?game.area.monsters.map(m=>({id:m.id,kind:m.kind,alive:m.alive})):[]; },
-  startGame, tapTile, tileToClient, toggleLayout, startBattle
+  get chapter(){ return STORY.chapter; },
+  get flags(){ return Object.assign({},STORY.flags); },
+  get objective(){ return STORY.objective; },
+  get done(){ return Object.assign({},STORY.done); },
+  get scene(){ return game.scene?{id:game.scene.id,step:game.scene.i}:null; },
+  get say(){ return game.scene&&game.scene.say?game.scene.say.text:null; },
+  get card(){ return game.card?game.card.lines.slice():null; },
+  get closeup(){
+    if(!CLOSEUP) return null;
+    const c=CLOSEUP, need=c.mode==='ORDERED'&&!c.ready?c.tray.indexOf(closeupExpected()):-1;
+    return {mode:c.mode, ready:c.ready, cursor:c.cursor, need, placed:c.slots.length, msg:c.msgT>0?c.msg:''};
+  },
+  get actors(){ return game.actors.map(a=>({id:a.id,x:a.x,y:a.y})); },
+  startGame, startChapter, tapTile, tileToClient, toggleLayout, startBattle
 };
