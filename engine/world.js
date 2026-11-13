@@ -3,7 +3,6 @@
 // Walk mask legend: '#' blocked, '.' walkable, 'D' door (walk onto it to go in), 'M' mat (walk onto it to go out),
 // 'E' edge (walk onto it to go on to the next area). Doors, mats and edges are portals; each portal says where it leads.
 const T=16;                                             // logical pixels per tile
-const LAYOUT_SIZE={portrait:{w:360,h:640},landscape:{w:640,h:360}};
 const MOVE_TIME=0.13;                                   // seconds per tile step
 const PORTAL_CHARS='DME';
 

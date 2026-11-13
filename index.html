@@ -9,14 +9,14 @@
 <link rel="icon" href="data:,">
 <style>
 html,body{margin:0;height:100%;background:#161d1b;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;font-family:system-ui,-apple-system,sans-serif;color:#ddd}
-#view{position:absolute;background:#1b2321;image-rendering:pixelated;cursor:pointer}
+#view{position:fixed;left:0;top:0;width:100%;height:100%;background:#1b2321;image-rendering:pixelated;cursor:pointer}
 #controls{position:fixed;inset:0;pointer-events:none}
 .pad{position:absolute;pointer-events:auto}
 #dpad{width:138px;height:138px;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:4px}
-.dir{background:#2e3b37;border:0;border-radius:10px;color:#cfd8d4;font-size:18px;touch-action:none;padding:0}
+.dir{background:rgba(46,59,55,.72);border:0;border-radius:10px;color:#cfd8d4;font-size:18px;touch-action:none;padding:0}
 .dir.active{background:#55706a}
 .dir.blank{background:transparent}
-#act{width:84px;height:84px;border-radius:50%;border:0;background:#2e3b37;color:#e8efe9;font-size:16px;letter-spacing:.08em;touch-action:none;padding:0}
+#act{width:84px;height:84px;border-radius:50%;border:0;background:rgba(46,59,55,.72);color:#e8efe9;font-size:16px;letter-spacing:.08em;touch-action:none;padding:0}
 #act.pressed{background:#55706a}
 #rotate{position:fixed;top:10px;right:10px;background:#2e3b37;color:#cfd8d4;border:0;border-radius:8px;padding:8px 10px;font-size:12px;letter-spacing:.06em;touch-action:none}
 #toast{position:fixed;left:50%;top:50px;transform:translateX(-50%);background:rgba(20,28,26,.92);color:#eef3ef;padding:8px 14px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
@@ -45,8 +45,8 @@ html.landscape #act{right:26px;top:50%;margin-top:-42px}
 </div>
 <button id="rotate">ROTATE</button>
 <div id="toast" role="status"></div>
-<script src="engine/world.js?v=1a1"></script>
-<script src="engine/draw.js?v=1a1"></script>
-<script src="engine/main.js?v=1a1"></script>
+<script src="engine/world.js?v=1a2"></script>
+<script src="engine/draw.js?v=1a2"></script>
+<script src="engine/main.js?v=1a2"></script>
 </body>
 </html>

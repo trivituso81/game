@@ -4,7 +4,6 @@
 const KEYS={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};
 const DIRS={up:{x:0,y:-1},down:{x:0,y:1},left:{x:-1,y:0},right:{x:1,y:0}};
 const STORE_KEY='ffiv-layout';
-const CTRL_BOTTOM=170, CTRL_SIDE=170;                   // px kept free for the controls
 const FADE_TIME=0.25;
 
 const view=document.getElementById('view');
@@ -19,19 +18,14 @@ const game={
 let override=null;
 try { override=localStorage.getItem(STORE_KEY); } catch(e) { override=null; }
 function isLandscape() { return override==='landscape'?true:override==='portrait'?false:innerWidth>innerHeight; }
+// The stage fills the whole window, one logical pixel per screen pixel. The D-pad and A are drawn over the map (index.html),
+// as in the first game, so nothing is reserved for them. The portrait or landscape class only moves the controls.
 function layout() {
   const land=isLandscape(), vw=innerWidth, vh=innerHeight;
   document.documentElement.classList.toggle('landscape',land);
   document.documentElement.classList.toggle('portrait',!land);
-  const size=land?LAYOUT_SIZE.landscape:LAYOUT_SIZE.portrait;
-  game.LW=size.w; game.LH=size.h;
-  const ax=land?vw-2*CTRL_SIDE:vw, ay=land?vh:vh-CTRL_BOTTOM;
-  const s=Math.max(0.1,Math.min(ax/game.LW,ay/game.LH));
-  const cw=Math.floor(game.LW*s), ch=Math.floor(game.LH*s);
-  view.style.width=cw+'px'; view.style.height=ch+'px';
-  view.style.left=((land?CTRL_SIDE:0)+Math.floor((ax-cw)/2))+'px';
-  view.style.top=Math.floor((ay-ch)/2)+'px';
-  game.k=Math.min(3,Math.max(1,Math.ceil((window.devicePixelRatio||1)*s)));
+  game.LW=Math.max(1,Math.round(vw)); game.LH=Math.max(1,Math.round(vh));
+  game.k=Math.min(3,Math.max(1,Math.ceil(window.devicePixelRatio||1)));
   view.width=game.LW*game.k; view.height=game.LH*game.k;
 }
 function toggleLayout() {

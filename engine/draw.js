@@ -67,7 +67,8 @@ function fadeAlpha() {
 }
 
 function drawFrame(time) {
-  ctx.fillStyle='#1b2321'; ctx.fillRect(0,0,game.LW,game.LH);
+  // Outside the map's walls the screen is filled with wall grey, so no black bars show on a tall or wide phone.
+  ctx.fillStyle=game.mode==='title'?'#1b2321':'#4a4f4c'; ctx.fillRect(0,0,game.LW,game.LH);
   if(game.mode==='title') { drawTitle(time); return; }
   ctx.save();
   ctx.translate(-Math.round(game.camX),-Math.round(game.camY));
