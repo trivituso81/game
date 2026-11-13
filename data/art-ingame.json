@@ -1,4 +1,9 @@
 {
   "note": "Pictures approved in the Art Library. Written by art.html on Approve.",
-  "installed": {}
+  "installed": {
+    "test-grey-figure": {
+      "path": "art/test-grey-figure.jpg",
+      "approved": "2026-11-13"
+    }
+  }
 }
