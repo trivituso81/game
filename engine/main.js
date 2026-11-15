@@ -11,7 +11,7 @@ const ctx=view.getContext('2d');
 const input={keys:new Map(),touch:null,pad:null};
 const game={
   mode:'title', area:null, walker:{x:0,y:0,fromX:0,fromY:0,toX:0,toY:0,moving:false,t:0,face:'down'},
-  path:null, trans:null, camX:0, camY:0, LW:360, LH:640, k:1, faults:[],
+  path:null, trans:null, camX:0, camY:0, LW:360, LH:640, k:1, faults:[], safe:{t:0,r:0,b:0,l:0}, safeTest:null,
   party:makeParty(), bag:BAG_START, difficulty:1,
   actors:[], scene:null, card:null, camFocus:null, camSmooth:false, sceneFade:0, chapterCursor:0
 };
@@ -22,8 +22,18 @@ try { override=localStorage.getItem(STORE_KEY); } catch(e) { override=null; }
 function isLandscape() { return override==='landscape'?true:override==='portrait'?false:innerWidth>innerHeight; }
 // The stage fills the whole window, one logical pixel per screen pixel. The D-pad and A are drawn over the map (index.html),
 // as in the first game, so nothing is reserved for them. The portrait or landscape class only moves the controls.
+// Safe area: the parts of the screen kept clear of the Dynamic Island, the rounded corners and the home bar. Read from the
+// CSS env(safe-area-inset-*) values through the hidden #safe element in index.html. Tests can set game.safeTest instead.
+const safeEl=document.getElementById('safe');
+function readSafe() {
+  if(game.safeTest) return Object.assign({t:0,r:0,b:0,l:0},game.safeTest);
+  if(!safeEl) return {t:0,r:0,b:0,l:0};
+  const cs=getComputedStyle(safeEl), px=v=>parseFloat(v)||0;
+  return {t:px(cs.paddingTop),r:px(cs.paddingRight),b:px(cs.paddingBottom),l:px(cs.paddingLeft)};
+}
 function layout() {
   const land=isLandscape(), vw=innerWidth, vh=innerHeight;
+  game.safe=readSafe();
   document.documentElement.classList.toggle('landscape',land);
   document.documentElement.classList.toggle('portrait',!land);
   game.LW=Math.max(1,Math.round(vw)); game.LH=Math.max(1,Math.round(vh));
@@ -46,6 +56,7 @@ function toast(msg,ms) {
   clearTimeout(toastTimer);
   toastTimer=setTimeout(()=>toastEl.classList.remove('on'),ms||1600);
 }
+function clearToast() { clearTimeout(toastTimer); toastEl.classList.remove('on'); }
 
 // ---------- Walking ----------
 function setArea(id,spawn) {
@@ -192,7 +203,8 @@ function updateCamera() {
 addEventListener('keydown',e=>{
   if(e.code==='KeyL'&&!e.repeat) { e.preventDefault(); toggleLayout(); return; }
   if(KEYS[e.code]) { e.preventDefault(); input.keys.set(e.code,KEYS[e.code]); if(!e.repeat) dirPressed(KEYS[e.code]); return; }
-  if((e.code==='Enter'||e.code==='Space')&&!e.repeat) { e.preventDefault(); action(); }
+  if((e.code==='Enter'||e.code==='Space')&&!e.repeat) { e.preventDefault(); action(); return; }
+  if((e.code==='Escape'||e.code==='Backspace'||e.code==='KeyX')&&!e.repeat&&game.mode==='battle') { e.preventDefault(); battleBack(); }
 });
 addEventListener('keyup',e=>{ input.keys.delete(e.code); });
 addEventListener('blur',()=>{ input.keys.clear(); input.touch=null; });
@@ -226,6 +238,7 @@ function pollPad() {
   input.pad=(b(12)||ay<-.5)?'up':(b(13)||ay>.5)?'down':(b(14)||ax<-.5)?'left':(b(15)||ax>.5)?'right':null;
   if(input.pad&&input.pad!==before) dirPressed(input.pad);
   const a=b(0); if(a&&!padPrev.a) action(); padPrev.a=a;
+  const bk=b(1); if(bk&&!padPrev.b&&game.mode==='battle') battleBack(); padPrev.b=bk;
   const l=b(4); if(l&&!padPrev.l) toggleLayout(); padPrev.l=l;
 }
 
@@ -233,6 +246,14 @@ function pollPad() {
 const faults=game.faults;
 function guard(name,fn) {
   try { fn(); } catch(err) { if(faults.length<50) faults.push(name+': '+err.message); console.error(name,err); }
+}
+// In a fight the D-pad and A are hidden: every choice is a tap on the menu or a figure, and keys and gamepad still work.
+let controlsMode='';
+function showControls() {
+  const m=game.mode==='battle'?'battle':'walk';
+  if(m===controlsMode) return;
+  controlsMode=m;
+  document.documentElement.classList.toggle('in-battle',m==='battle');
 }
 let last=performance.now();
 function frame(now) {
@@ -242,6 +263,7 @@ function frame(now) {
   guard('update',()=>update(dt));
   guard('camera',updateCamera);
   guard('draw',()=>{ ctx.setTransform(game.k,0,0,game.k,0,0); drawFrame(now/1000); });
+  guard('controls',showControls);
   requestAnimationFrame(frame);
 }
 
@@ -259,7 +281,12 @@ async function loadInstalledAreas() {
   }
   installAreas(list,tag);
 }
-addEventListener('resize',layout);
+// Fold, unfold, rotate and half fold all change the window size, sometimes in steps. Lay out on each change, and once more
+// a moment later, since iOS can report the final size after the event.
+function relayout() { layout(); setTimeout(layout,250); }
+addEventListener('resize',relayout);
+addEventListener('orientationchange',relayout);
+if(window.visualViewport) visualViewport.addEventListener('resize',relayout);
 layout();
 document.documentElement.classList.add('js-running');
 Promise.all([
@@ -286,10 +313,14 @@ window.__FFIV={
   get problems(){ return validateWorld(); },
   get battle(){
     if(!BATTLE) return null;
-    return {phase:BATTLE.phase, result:BATTLE.result, cursor:BATTLE.cursor, actor:BATTLE.actor, turn:BATTLE.turn,
-      queue:BATTLE.queue.slice(), enemy:{name:BATTLE.enemy.name,hp:BATTLE.enemy.hp,maxHp:BATTLE.enemy.maxHp,shield:BATTLE.enemy.shield,boss:BATTLE.enemy.boss}};
+    const foe=f=>({name:f.name,hp:f.hp,maxHp:f.maxHp,shield:f.shield,boss:f.boss});
+    return {phase:BATTLE.phase, result:BATTLE.result, cursor:BATTLE.cursor, actor:BATTLE.actor, turn:BATTLE.turn, pending:BATTLE.pending,
+      target:BATTLE.target, queue:BATTLE.queue.map(q=>q.text), enemy:foe(BATTLE.foes[0]), foes:BATTLE.foes.map(foe)};
   },
-  get party(){ return game.party.map(m=>({name:m.name,lv:m.lv,hp:m.hp,maxHp:m.maxHp,specialUsed:m.specialUsed})); },
+  get party(){ return game.party.map(m=>({name:m.name,lv:m.lv,hp:m.hp,maxHp:m.maxHp,atk:m.atk,boost:m.boost,special:m.special,specialUsed:m.specialUsed,defend:m.defend})); },
+  get safe(){ return Object.assign({},game.safe); },
+  get layoutRects(){ return BATTLE?battleLayout():null; },
+  setSafeTest(v){ game.safeTest=v; layout(); },
   get bag(){ return game.bag; },
   get difficulty(){ return DIFFICULTY[game.difficulty].label; },
   get lastResult(){ return lastResult; },
@@ -308,5 +339,5 @@ window.__FFIV={
     return {mode:c.mode, ready:c.ready, cursor:c.cursor, need, placed:c.slots.length, msg:c.msgT>0?c.msg:''};
   },
   get actors(){ return game.actors.map(a=>({id:a.id,x:a.x,y:a.y})); },
-  startGame, startChapter, tapTile, tileToClient, toggleLayout, startBattle
+  startGame, startChapter, tapTile, tileToClient, toggleLayout, startBattle, battleBack
 };

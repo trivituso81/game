@@ -2,6 +2,14 @@
 
 Every push adds an entry here. Newest first. Numbering restarts at 1 with the finished blank engine.
 
+## 2 (2026-11-14): four-hero battle, iPhone Duo layout, full screen (Build 1g.1)
+
+- Party of four placeholders, HERO 1 to HERO 4, each with its own tint and SPECIAL: BIG HIT, SWEEP, HEAL, RALLY. Commands: ATTACK, DEFEND, SPECIAL, ITEM. Rules in `docs/BATTLE_SYSTEM.md`.
+- Fights against one or two monsters (MONSTER A, MONSTER B) or the boss. The FIELD B fight is now two monsters (kind `pair`). Attacks, HEAL and ITEM pick a target by tap, or by direction and A; BACK, Escape or gamepad B backs out.
+- New battle screen for the iPhone Duo in landscape: side view, monsters left, heroes right, command menu bottom left, party status bottom right, all drawn over a full-window battlefield inside the safe area. Re-lays out on every resize. Portrait, the folded screen and tall phones also work. Hit flashes, floating numbers and HP bars move with the messages. The D-pad and A are hidden during fights.
+- Full screen from the home-screen icon: `manifest.webmanifest`, black-translucent status bar, code-made icons in `icons/`. The icon must be deleted and added again once to pick this up.
+- Build tag `1g1`. `tools/smoke.py` adds every command, a four against two win and loss, and battle frames at the Duo inner and outer sizes, 4:3 and a tall phone, both orientations, with layout checks.
+
 ## 1 (2026-11-12): blank engine complete (Build 1f)
 
 - Docs written for the blank engine: `CLAUDE.md` (working agreement), `docs/ARCHITECTURE.md`, `docs/BATTLE_SYSTEM.md`, `docs/ART_PIPELINE.md`, `docs/VOICE_PIPELINE.md`, `docs/MUSIC_PIPELINE.md`, `docs/WORKFLOW.md`, and an empty `docs/CANON.md`.

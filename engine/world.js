@@ -51,7 +51,7 @@ const AREAS={
     ],
     portals:[{x:1,y:20,to:'town',spawn:{x:19,y:20}}],
     monsters:[
-      {id:'field-monster',kind:'monster',x:14,y:14},   // test fight: a grey monster
+      {id:'field-monster',kind:'pair',x:14,y:14},      // test fight: two grey monsters
       {id:'field-boss',kind:'boss',x:18,y:34}          // a grey boss with a shield
     ],
     spawn:{x:2,y:20}

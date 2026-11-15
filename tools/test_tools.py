@@ -652,14 +652,14 @@ def audio_part(tmp, browser):
     p1 = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
     p1.goto(f'http://127.0.0.1:{PORT}/index.html'); p1.wait_for_function('() => window.__FFIV && __FFIV.ready', timeout=15000)
     ids['line'] = p1.evaluate('(t) => voiceId("guide", t)', l1)
-    ids['fight'] = p1.evaluate('(t) => voiceId("battle", t)', 'MONSTER appears.')
+    ids['fight'] = p1.evaluate('(t) => voiceId("battle", t)', 'MONSTER A appears.')
     p1.close()
     os.makedirs(f'{tmp}/audio/voice', exist_ok=True); os.makedirs(f'{tmp}/audio/music', exist_ok=True)
     open(f'{tmp}/audio/voice/{ids["line"]}.mp3', 'wb').write(EL_MP3)
     open(f'{tmp}/audio/voice/{ids["fight"]}.mp3', 'wb').write(EL_MP3)
     open(f'{tmp}/audio/music/town-theme.mp3', 'wb').write(EL_MP3)
     json.dump({'tag': 'x1', 'lines': {ids['line']: {'who': 'guide', 'text': l1, 'where': 'scene', 'file': ids['line'] + '.mp3'},
-                                      ids['fight']: {'who': 'battle', 'text': 'MONSTER appears.', 'where': 'battle', 'file': ids['fight'] + '.mp3'}}}, open(f'{tmp}/data/voice-lines.json', 'w'))
+                                      ids['fight']: {'who': 'battle', 'text': 'MONSTER A appears.', 'where': 'battle', 'file': ids['fight'] + '.mp3'}}}, open(f'{tmp}/data/voice-lines.json', 'w'))
     json.dump({'tag': 'y1', 'tracks': {'town-theme': {'title': 'Town theme', 'file': 'town-theme.mp3', 'len': 1}}, 'use': {'area:town': 'town-theme'}}, open(f'{tmp}/data/music.json', 'w'))
     for name, size in {'portrait': (390, 844), 'landscape': (844, 390)}.items():
         ctx = browser.new_context(viewport={'width': size[0], 'height': size[1]})
@@ -765,7 +765,7 @@ def voices_part(tmp, browser):
         check(f'voices {name}: the list names the new file and moves its cache tag', lst['lines'][lid]['file'] == f'{lid}.mp3' and lst['tag'] != 'old' and 'old-name.mp3' not in json.dumps(lst), lst)
         check(f'voices {name}: the row now says HAS FILE', 'HAS FILE' in page.locator(f'#list .item[data-id="{lid}"]').inner_text())
         # fight line
-        page.fill('#addtext', 'MONSTER appears.'); page.click('#addline')
+        page.fill('#addtext', 'MONSTER A appears.'); page.click('#addline')
         check(f'voices {name}: a fight line can be added', page.locator('#list .item').count() == 5, page.locator('#list .item').count())
         # purge: an orphan scene line with a file, and a stray file the list does not name
         put_json(repo, 'data/voice-lines.json', {'tag': 'p', 'lines': {lid: lst['lines'][lid], 'guide-deadbeef': {'who': 'guide', 'text': 'gone', 'where': 'scene', 'file': 'guide-deadbeef.mp3'}}})

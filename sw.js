@@ -7,7 +7,7 @@
 //   data/*.json          network first, saved copy only when the network fails
 //   everything else      not touched: audio, admin pages, admin-lib.js, any address without a ?v= tag, other sites, anything that is not a GET
 // SW_TAG must equal the ?v= tag on the script tags in index.html, and ENGINE must list the same files in the same order. tools/check_repo.py checks both.
-const SW_TAG='1f';
+const SW_TAG='1g1';
 const ENGINE=['world','audio','draw','battle','battle-draw','story','story-draw','main'];
 const SHELL_CACHE='ffiv-shell-'+SW_TAG, DATA_CACHE='ffiv-data', ART_STORE='ffiv-art';
 const SHELL=['index.html'].concat(ENGINE.map(n=>'engine/'+n+'.js?v='+SW_TAG));

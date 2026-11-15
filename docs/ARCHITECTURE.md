@@ -122,4 +122,10 @@ A browser driven by a test does not register the worker, so tests see plain netw
 
 ## Debug handle
 
-`window.__FFIV` exposes read-only state for tests and for checking by hand: `mode`, `area`, `walker`, `ready`, `busy`, `faults`, `problems`, `battle`, `party`, `bag`, `difficulty`, `lastResult`, `monsters`, `chapter`, `flags`, `objective`, `done`, `audio`, `scene`, `say`, `card`, `closeup`, `actors`, plus `startGame`, `startChapter`, `tapTile`, `tileToClient`, `toggleLayout`, `startBattle`.
+`window.__FFIV` exposes read-only state for tests and for checking by hand: `mode`, `area`, `walker`, `ready`, `busy`, `faults`, `problems`, `battle`, `party`, `bag`, `difficulty`, `lastResult`, `safe`, `layoutRects`, `monsters`, `chapter`, `flags`, `objective`, `done`, `audio`, `scene`, `say`, `card`, `closeup`, `actors`, plus `startGame`, `startChapter`, `tapTile`, `tileToClient`, `toggleLayout`, `startBattle`, `battleBack`, `setSafeTest`.
+
+## Full screen, safe area and resizing (Build 1g.1)
+
+- `manifest.webmanifest` asks for full screen (`display: fullscreen`, falling back to `standalone`) and any orientation. `index.html` adds `apple-mobile-web-app-capable`, the black-translucent status bar, `viewport-fit=cover` and the code-made icons in `icons/`. Safari on iPhone gives full screen only to a page opened from its home-screen icon.
+- Safe area: the hidden `#safe` element carries `env(safe-area-inset-*)` as padding; `layout()` reads it into `game.safe` on every layout. Tests set `game.safeTest` through `__FFIV.setSafeTest` instead. The SOUND and ROTATE buttons, the toast, the D-pad and A also sit inside the safe area through CSS.
+- Layout runs on `resize`, `orientationchange` and `visualViewport` resize, and once more 250 ms later, because iOS can report the final size after a fold, unfold or rotation.
